@@ -47,8 +47,10 @@ function Today() {
     queryFn: async () => {
       const { data: rows, error } = await supabase
         .from("coach_messages")
-        .select("id,role,content,created_at")
+        .select("id,role,content,created_at,review_subject,review_session_date")
         .eq("user_id", user!.id)
+        .is("review_subject", null)
+        .is("review_session_date", null)
         .order("created_at", { ascending: true })
         .limit(120);
       if (error) throw error;
@@ -102,6 +104,8 @@ function Today() {
         user_id: user.id,
         role: "user",
         content: text,
+        review_subject: null,
+        review_session_date: null,
       });
       if (uErr) throw uErr;
 
@@ -111,6 +115,8 @@ function Today() {
         .from("coach_messages")
         .select("role,content")
         .eq("user_id", user.id)
+        .is("review_subject", null)
+        .is("review_session_date", null)
         .order("created_at", { ascending: true })
         .limit(120);
       if (hErr) throw hErr;
@@ -130,6 +136,8 @@ function Today() {
         user_id: user.id,
         role: "assistant",
         content: reply,
+        review_subject: null,
+        review_session_date: null,
       });
       if (aErr) throw aErr;
 

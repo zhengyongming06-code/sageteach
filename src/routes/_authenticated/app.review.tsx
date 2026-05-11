@@ -32,6 +32,8 @@ function formatDateLabel(ymd: string) {
   return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", weekday: "short" });
 }
 
+type SessionRow = { id: string; session_date: string };
+
 function Review() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -49,29 +51,41 @@ function Review() {
     enabled: !!user?.id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("review_sessions")
-        .select("id,session_date,created_at")
+        .from("coach_messages")
+        .select("review_session_date")
         .eq("user_id", user!.id)
-        .eq("subject", subject)
-        .order("session_date", { ascending: false });
+        .eq("review_subject", subject)
+        .not("review_session_date", "is", null)
+        .order("review_session_date", { ascending: false });
       if (error) throw error;
-      return data ?? [];
+      const seen = new Set<string>();
+      const list: SessionRow[] = [];
+      for (const row of data ?? []) {
+        const d = row.review_session_date;
+        if (!d || seen.has(d)) continue;
+        seen.add(d);
+        list.push({ id: d, session_date: d });
+      }
+      return list;
     },
   });
 
-  const sessionId = useMemo(
-    () => sessions.find((s) => s.session_date === selectedDate)?.id ?? null,
+  const hasSessionForSelectedDate = useMemo(
+    () => sessions.some((s) => s.session_date === selectedDate),
     [sessions, selectedDate],
   );
 
   const { data: messageRows = [] } = useQuery({
-    queryKey: ["review-messages", sessionId],
-    enabled: !!user?.id && !!sessionId,
+    queryKey: ["review-messages", user?.id, subject, selectedDate],
+    enabled: !!user?.id,
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("review_messages")
+        .from("coach_messages")
         .select("id,role,content,created_at")
-        .eq("session_id", sessionId!)
+        .eq("user_id", user!.id)
+        .eq("review_subject", subject)
+        .eq("review_session_date", selectedDate)
+        .in("role", ["user", "assistant"])
         .order("created_at", { ascending: true });
       if (error) throw error;
       return data ?? [];
@@ -104,34 +118,25 @@ function Review() {
     setDraft("");
 
     try {
-      let sid = sessionId;
-      if (!sid) {
-        const { data: row, error: upErr } = await supabase
-          .from("review_sessions")
-          .upsert(
-            { user_id: user.id, subject, session_date: selectedDate },
-            { onConflict: "user_id,subject,session_date" },
-          )
-          .select("id")
-          .single();
-        if (upErr) throw upErr;
-        sid = row.id;
-        await qc.invalidateQueries({ queryKey: ["review-sessions", user.id, subject] });
-      }
-
-      const { error: uErr } = await supabase.from("review_messages").insert({
-        session_id: sid,
+      const { error: uErr } = await supabase.from("coach_messages").insert({
+        user_id: user.id,
         role: "user",
         content: text,
+        review_subject: subject,
+        review_session_date: selectedDate,
       });
       if (uErr) throw uErr;
 
-      await qc.invalidateQueries({ queryKey: ["review-messages", sid] });
+      await qc.invalidateQueries({ queryKey: ["review-sessions", user.id, subject] });
+      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subject, selectedDate] });
 
       const { data: history, error: hErr } = await supabase
-        .from("review_messages")
+        .from("coach_messages")
         .select("role,content")
-        .eq("session_id", sid)
+        .eq("user_id", user.id)
+        .eq("review_subject", subject)
+        .eq("review_session_date", selectedDate)
+        .in("role", ["user", "assistant"])
         .order("created_at", { ascending: true });
       if (hErr) throw hErr;
 
@@ -146,21 +151,24 @@ function Review() {
 
       const reply = await fetchDeepSeekReply(apiMessages);
 
-      const { error: aErr } = await supabase.from("review_messages").insert({
-        session_id: sid,
+      const { error: aErr } = await supabase.from("coach_messages").insert({
+        user_id: user.id,
         role: "assistant",
         content: reply,
+        review_subject: subject,
+        review_session_date: selectedDate,
       });
       if (aErr) throw aErr;
 
-      await qc.invalidateQueries({ queryKey: ["review-messages", sid] });
+      await qc.invalidateQueries({ queryKey: ["review-sessions", user.id, subject] });
+      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subject, selectedDate] });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "发送失败";
       toast.error(msg);
     } finally {
       setIsSending(false);
     }
-  }, [draft, user?.id, isSending, sessionId, subject, selectedDate, qc]);
+  }, [draft, user?.id, isSending, subject, selectedDate, qc]);
 
   return (
     <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-5 pb-2 md:min-h-[calc(100dvh-7rem)]">
@@ -251,6 +259,12 @@ function Review() {
               </SelectContent>
             </Select>
           </div>
+
+          {!hasSessionForSelectedDate && messages.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              这是新会话；发第一条消息后，该日期会出现在左侧列表。
+            </p>
+          )}
 
           <SageChatPanel
             messages={messages}
