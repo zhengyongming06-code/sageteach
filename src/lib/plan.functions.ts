@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { SAGE_PERSONA, callLovableAI } from "./ai.server";
+import { SAGE_DEEPSEEK_SYSTEM_PROMPT } from "./sage-system-prompt";
+import { fetchDeepSeekReplyServer } from "./deepseek.server";
 
 export const generateTodayPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -8,17 +10,33 @@ export const generateTodayPlan = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const today = new Date().toISOString().slice(0, 10);
 
-    const existing = await supabase.from("daily_plans").select("plan").eq("user_id", userId).eq("plan_date", today).maybeSingle();
+    const existing = await supabase
+      .from("daily_plans")
+      .select("plan")
+      .eq("user_id", userId)
+      .eq("plan_date", today)
+      .maybeSingle();
     if (existing.data?.plan) return { plan: existing.data.plan as PlanShape };
 
     const [profileRes, weakRes, reflRes] = await Promise.all([
-      supabase.from("profiles").select("grade,current_score,target_score,exam_date").eq("id", userId).maybeSingle(),
+      supabase
+        .from("profiles")
+        .select("grade,current_score,target_score,exam_date")
+        .eq("id", userId)
+        .maybeSingle(),
       supabase.from("weak_subjects").select("subject").eq("user_id", userId),
-      supabase.from("reflections").select("subject,ai_diagnosis,created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(5),
+      supabase
+        .from("reflections")
+        .select("subject,ai_diagnosis,created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(5),
     ]);
     const p = profileRes.data;
     const weak = (weakRes.data ?? []).map((r) => r.subject).join("、");
-    const recent = (reflRes.data ?? []).map((r) => `${r.subject}: ${(r.ai_diagnosis ?? "").slice(0, 120)}`).join("\n");
+    const recent = (reflRes.data ?? [])
+      .map((r) => `${r.subject}: ${(r.ai_diagnosis ?? "").slice(0, 120)}`)
+      .join("\n");
 
     const sys = `${SAGE_PERSONA}
 
@@ -41,7 +59,10 @@ export const generateTodayPlan = createServerFn({ method: "POST" })
 ${recent || "（无）"}`;
 
     const res = await callLovableAI({
-      messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: usr },
+      ],
       reasoning: { effort: "low" },
     });
     if (!res.ok) throw new Error("AI 暂时连不上");
@@ -49,9 +70,15 @@ ${recent || "（无）"}`;
     let raw: string = json.choices?.[0]?.message?.content ?? "{}";
     raw = raw.replace(/```json|```/g, "").trim();
     let plan: PlanShape;
-    try { plan = JSON.parse(raw); } catch { throw new Error("AI 返回格式异常，再试一次"); }
+    try {
+      plan = JSON.parse(raw);
+    } catch {
+      throw new Error("AI 返回格式异常，再试一次");
+    }
 
-    await supabase.from("daily_plans").upsert({ user_id: userId, plan_date: today, plan }, { onConflict: "user_id,plan_date" });
+    await supabase
+      .from("daily_plans")
+      .upsert({ user_id: userId, plan_date: today, plan }, { onConflict: "user_id,plan_date" });
     return { plan };
   });
 
@@ -60,7 +87,12 @@ export const getTodayPlan = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
     const today = new Date().toISOString().slice(0, 10);
-    const { data } = await supabase.from("daily_plans").select("plan").eq("user_id", userId).eq("plan_date", today).maybeSingle();
+    const { data } = await supabase
+      .from("daily_plans")
+      .select("plan")
+      .eq("user_id", userId)
+      .eq("plan_date", today)
+      .maybeSingle();
     return { plan: (data?.plan as PlanShape | null) ?? null };
   });
 
@@ -69,16 +101,27 @@ export const generateScorePlan = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
     const [profileRes, weakRes, reflRes] = await Promise.all([
-      supabase.from("profiles").select("grade,current_score,target_score,exam_date").eq("id", userId).maybeSingle(),
+      supabase
+        .from("profiles")
+        .select("grade,current_score,target_score,exam_date")
+        .eq("id", userId)
+        .maybeSingle(),
       supabase.from("weak_subjects").select("subject").eq("user_id", userId),
-      supabase.from("reflections").select("subject,ai_diagnosis,created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(8),
+      supabase
+        .from("reflections")
+        .select("subject,ai_diagnosis,created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(8),
     ]);
     const p = profileRes.data;
     const weak = (weakRes.data ?? []).map((r) => r.subject).join("、");
-    const days = p?.exam_date ? Math.max(0, Math.ceil((new Date(p.exam_date).getTime() - Date.now()) / 86400000)) : null;
+    const days = p?.exam_date
+      ? Math.max(0, Math.ceil((new Date(p.exam_date).getTime() - Date.now()) / 86400000))
+      : null;
     const gap = (p?.target_score ?? 0) - (p?.current_score ?? 0);
 
-    const sys = `${SAGE_PERSONA}
+    const sys = `${SAGE_DEEPSEEK_SYSTEM_PROMPT}
 
 任务：写一份"提分诊断报告"，markdown 格式：
 
@@ -103,13 +146,10 @@ export const generateScorePlan = createServerFn({ method: "POST" })
 薄弱：${weak || "未填"}
 最近复盘：${(reflRes.data ?? []).map((r) => `[${r.subject}] ${(r.ai_diagnosis ?? "").slice(0, 100)}`).join(" / ") || "无"}`;
 
-    const res = await callLovableAI({
-      messages: [{ role: "system", content: sys }, { role: "user", content: usr }],
-      reasoning: { effort: "medium" },
-    });
-    if (!res.ok) throw new Error("AI 暂时连不上");
-    const json = await res.json();
-    const text: string = json.choices?.[0]?.message?.content ?? "";
+    const text = await fetchDeepSeekReplyServer([
+      { role: "system", content: sys },
+      { role: "user", content: usr },
+    ]);
     await supabase.from("score_plans").insert({ user_id: userId, plan: { text, gap, days } });
     return { text };
   });
@@ -118,7 +158,13 @@ export const getLatestScorePlan = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
-    const { data } = await supabase.from("score_plans").select("plan,created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const { data } = await supabase
+      .from("score_plans")
+      .select("plan,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
     return { plan: data?.plan as { text: string } | null, created_at: data?.created_at ?? null };
   });
 
