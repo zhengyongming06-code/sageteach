@@ -20,8 +20,10 @@ function Landing() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
         <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground text-sm">学</span>
-          <span>Sage 学习教练</span>
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
+            S
+          </span>
+          <span>Sage</span>
         </Link>
         <nav className="flex items-center gap-2 text-sm">
           {session ? (
@@ -94,7 +96,7 @@ function Landing() {
       </main>
 
       <footer className="border-t border-border py-8 text-center text-xs text-muted-foreground">
-        © Sage 学习教练 · 别一个人扛
+        © Sage · 别一个人扛
       </footer>
     </div>
   );

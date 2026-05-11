@@ -1,105 +1,270 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-import { listReflections, submitReflection } from "@/lib/reflection.functions";
-import { REFLECTION_QUESTIONS, SUBJECTS, type Subject } from "@/lib/subjects";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { ChevronLeft } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
+import { SUBJECTS, type Subject } from "@/lib/subjects";
+import { SAGE_DEEPSEEK_SYSTEM_PROMPT, reviewContextSuffix } from "@/lib/sage-system-prompt";
+import { fetchDeepSeekReply } from "@/lib/deepseek";
+import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
-import { motion, AnimatePresence } from "framer-motion";
-import ReactMarkdown from "react-markdown";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/app/review")({ component: Review });
 
+function localYmd(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function formatDateLabel(ymd: string) {
+  const [y, mo, da] = ymd.split("-").map(Number);
+  const d = new Date(y, mo - 1, da);
+  return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", weekday: "short" });
+}
+
 function Review() {
-  const [subject, setSubject] = useState<Subject | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [diagnosis, setDiagnosis] = useState<string | null>(null);
-
-  const submit = useServerFn(submitReflection);
-  const list = useServerFn(listReflections);
+  const { user } = useAuth();
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["reflections"], queryFn: () => list() });
+  const [subject, setSubject] = useState<Subject>(SUBJECTS[0]);
+  const [selectedDate, setSelectedDate] = useState(() => localYmd());
+  const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
 
-  const m = useMutation({
-    mutationFn: (vars: { subject: Subject; answers: Record<string, string> }) => submit({ data: vars }),
-    onSuccess: (r) => { setDiagnosis(r.diagnosis); qc.invalidateQueries({ queryKey: ["reflections"] }); },
-    onError: (e: Error) => toast.error(e.message),
+  useEffect(() => {
+    setSelectedDate(localYmd());
+  }, [subject]);
+
+  const { data: sessions = [] } = useQuery({
+    queryKey: ["review-sessions", user?.id, subject],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("review_sessions")
+        .select("id,session_date,created_at")
+        .eq("user_id", user!.id)
+        .eq("subject", subject)
+        .order("session_date", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
   });
 
-  if (diagnosis && subject) {
-    return (
-      <div className="space-y-5">
-        <button onClick={() => { setDiagnosis(null); setSubject(null); setAnswers({}); }} className="inline-flex items-center gap-1 text-sm text-muted-foreground"><ChevronLeft className="h-4 w-4" /> 完成</button>
-        <h1 className="text-2xl font-semibold">{subject} · 诊断</h1>
-        <article className="prose prose-sm max-w-none rounded-3xl border border-border bg-card p-6 dark:prose-invert prose-headings:font-semibold prose-headings:text-foreground prose-p:text-foreground/90 prose-strong:text-foreground">
-          <ReactMarkdown>{diagnosis}</ReactMarkdown>
-        </article>
-      </div>
-    );
-  }
+  const sessionId = useMemo(
+    () => sessions.find((s) => s.session_date === selectedDate)?.id ?? null,
+    [sessions, selectedDate],
+  );
 
-  if (subject) {
-    const qs = REFLECTION_QUESTIONS[subject];
-    const filled = qs.every((q) => (answers[q.id] ?? "").trim().length > 0);
-    return (
-      <div className="space-y-5">
-        <button onClick={() => setSubject(null)} className="inline-flex items-center gap-1 text-sm text-muted-foreground"><ChevronLeft className="h-4 w-4" /> 换学科</button>
-        <h1 className="text-2xl font-semibold">{subject} 复盘</h1>
-        <p className="text-sm text-muted-foreground">不用写很长。先把今天最具体的那道题/那一刻说出来。</p>
-        <div className="space-y-4">
-          {qs.map((q) => (
-            <div key={q.id} className="rounded-2xl border border-border bg-card p-4">
-              <label className="text-sm font-medium">{q.label}</label>
-              <Textarea
-                placeholder={q.placeholder ?? "随便写，写到自己看得懂就行"}
-                value={answers[q.id] ?? ""}
-                onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
-                className="mt-2 min-h-20 rounded-xl"
-              />
-            </div>
-          ))}
-        </div>
-        <Button onClick={() => m.mutate({ subject, answers })} disabled={!filled || m.isPending} className="h-12 w-full rounded-2xl text-base">
-          {m.isPending ? "Sage 正在看…" : "让 Sage 诊断"}
-        </Button>
-      </div>
-    );
-  }
+  const { data: messageRows = [] } = useQuery({
+    queryKey: ["review-messages", sessionId],
+    enabled: !!user?.id && !!sessionId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("review_messages")
+        .select("id,role,content,created_at")
+        .eq("session_id", sessionId!)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const messages: SageChatMessage[] = useMemo(
+    () =>
+      messageRows.map((m) => ({
+        id: m.id,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+    [messageRows],
+  );
+
+  const dateOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of sessions) set.add(s.session_date);
+    set.add(localYmd());
+    set.add(selectedDate);
+    return [...set].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  }, [sessions, selectedDate]);
+
+  const send = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || !user?.id || isSending) return;
+
+    setIsSending(true);
+    setDraft("");
+
+    try {
+      let sid = sessionId;
+      if (!sid) {
+        const { data: row, error: upErr } = await supabase
+          .from("review_sessions")
+          .upsert(
+            { user_id: user.id, subject, session_date: selectedDate },
+            { onConflict: "user_id,subject,session_date" },
+          )
+          .select("id")
+          .single();
+        if (upErr) throw upErr;
+        sid = row.id;
+        await qc.invalidateQueries({ queryKey: ["review-sessions", user.id, subject] });
+      }
+
+      const { error: uErr } = await supabase.from("review_messages").insert({
+        session_id: sid,
+        role: "user",
+        content: text,
+      });
+      if (uErr) throw uErr;
+
+      await qc.invalidateQueries({ queryKey: ["review-messages", sid] });
+
+      const { data: history, error: hErr } = await supabase
+        .from("review_messages")
+        .select("role,content")
+        .eq("session_id", sid)
+        .order("created_at", { ascending: true });
+      if (hErr) throw hErr;
+
+      const sys = SAGE_DEEPSEEK_SYSTEM_PROMPT + reviewContextSuffix(subject, selectedDate);
+      const apiMessages = [
+        { role: "system" as const, content: sys },
+        ...(history ?? []).map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+      ];
+
+      const reply = await fetchDeepSeekReply(apiMessages);
+
+      const { error: aErr } = await supabase.from("review_messages").insert({
+        session_id: sid,
+        role: "assistant",
+        content: reply,
+      });
+      if (aErr) throw aErr;
+
+      await qc.invalidateQueries({ queryKey: ["review-messages", sid] });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "发送失败";
+      toast.error(msg);
+    } finally {
+      setIsSending(false);
+    }
+  }, [draft, user?.id, isSending, sessionId, subject, selectedDate, qc]);
 
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-5 pb-2 md:min-h-[calc(100dvh-7rem)]">
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight">学科复盘</h1>
-        <p className="mt-1 text-sm text-muted-foreground">选一科，把今天卡住的那一段拆出来。</p>
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          选一科，和 Sage 聊聊今天哪里卡住——用问题把模糊变成具体。
+        </p>
       </header>
 
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-        {SUBJECTS.map((s) => (
-          <button key={s} onClick={() => { setSubject(s); setAnswers({}); }} className="rounded-2xl border border-border bg-card p-4 text-base font-medium transition hover:border-primary/40 hover:bg-primary/5">
-            {s}
-          </button>
-        ))}
-      </div>
-
-      {data?.items?.length ? (
-        <section>
-          <h2 className="mb-3 text-sm font-medium text-muted-foreground">最近的复盘</h2>
-          <div className="space-y-2">
-            {data.items.slice(0, 6).map((r) => (
-              <div key={r.id} className="rounded-2xl border border-border bg-card p-4">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-primary">{r.subject}</span>
-                  <span>{new Date(r.created_at).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}</span>
-                </div>
-                <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{(r.ai_diagnosis ?? "").replace(/[#*]/g, "")}</p>
-              </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <aside className="lg:w-52 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Sessions
+          </p>
+          <ul className="max-h-48 space-y-1 overflow-y-auto lg:max-h-[min(420px,50vh)]">
+            {sessions.map((s) => (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate(s.session_date)}
+                  className={cn(
+                    "w-full rounded-lg px-2.5 py-2 text-left text-sm transition",
+                    selectedDate === s.session_date
+                      ? "bg-primary/10 font-medium text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  <span className="block text-foreground">{formatDateLabel(s.session_date)}</span>
+                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                    {s.session_date}
+                  </span>
+                </button>
+              </li>
             ))}
+            {sessions.length === 0 && (
+              <li className="px-2.5 py-2 text-sm text-muted-foreground">
+                暂无记录，从下面「今天」开始。
+              </li>
+            )}
+          </ul>
+          <button
+            type="button"
+            onClick={() => setSelectedDate(localYmd())}
+            className={cn(
+              "mt-2 w-full rounded-lg border border-dashed border-border px-2.5 py-2 text-left text-sm transition hover:bg-muted",
+              selectedDate === localYmd() && "border-primary/40 bg-primary/5",
+            )}
+          >
+            + 今天 · {localYmd()}
+          </button>
+        </aside>
+
+        <div className="min-w-0 flex-1 space-y-4">
+          <div>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">科目</p>
+            <div className="flex flex-wrap gap-2">
+              {SUBJECTS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setSubject(s)}
+                  className={cn(
+                    "rounded-xl border px-3.5 py-2 text-sm font-medium transition",
+                    subject === s
+                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                      : "border-border bg-card text-foreground hover:border-ring/50",
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
-        </section>
-      ) : null}
+
+          <div className="md:hidden">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">复盘日期</p>
+            <Select value={selectedDate} onValueChange={setSelectedDate}>
+              <SelectTrigger className="rounded-xl border-border bg-card">
+                <SelectValue placeholder="选择日期" />
+              </SelectTrigger>
+              <SelectContent>
+                {dateOptions.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {formatDateLabel(d)} · {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <SageChatPanel
+            messages={messages}
+            draft={draft}
+            onDraftChange={setDraft}
+            onSubmit={() => void send()}
+            isSending={isSending}
+            emptyTitle="从这里开始复盘"
+            emptyHint="说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
+            placeholder={`聊聊今天的「${subject}」…`}
+            className="min-h-[320px] md:min-h-[420px]"
+          />
+        </div>
+      </div>
     </div>
   );
 }

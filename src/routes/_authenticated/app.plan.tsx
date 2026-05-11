@@ -22,7 +22,7 @@ function Plan() {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight">提分分析</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">Score</h1>
         <p className="mt-1 text-sm text-muted-foreground">不是平均用力，是看哪 20% 能拿走 80% 的分。</p>
       </header>
 
