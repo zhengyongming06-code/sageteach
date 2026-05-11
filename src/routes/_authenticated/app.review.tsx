@@ -80,7 +80,9 @@ function Review() {
   const { data: hasReviewCols } = useQuery({
     queryKey: ["coach-review-schema"],
     enabled: !!user?.id,
-    staleTime: Infinity,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     queryFn: () => coachMessagesHasReviewColumns(supabase),
   });
 
