@@ -44,13 +44,8 @@ function Landing() {
           transition={{ duration: 0.6 }}
           className="max-w-3xl"
         >
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
-            <span className="h-1.5 w-1.5 rounded-full bg-sage"></span>
-            为中国高中生打造的 AI 学习顾问
-          </div>
           <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-6xl">
-            不喊口号的<br className="hidden sm:block" />
-            高中学习教练。
+            Sage 一个帮你复盘提分的 AI
           </h1>
           <p className="mt-6 max-w-xl text-balance text-base leading-relaxed text-muted-foreground sm:text-lg">
             Sage 不会说"你一定可以"。<br />
@@ -86,17 +81,16 @@ function Landing() {
           ))}
         </section>
 
-        <section className="mt-20 rounded-3xl border border-border bg-warm p-8 sm:p-12">
+        <section className="mt-20 w-full rounded-3xl border border-border bg-warm px-8 py-10 sm:px-12 sm:py-12">
           <p className="text-balance font-serif text-xl leading-relaxed text-warm-foreground sm:text-2xl">
-            "高三那年我最怕的，不是考砸，是不知道自己为什么考砸。<br />
-            Sage 不哄我，它问我那道题第几步断的——然后我才看清楚。"
+            成功就是做那些常人坚持不下去的事情，不断突破和超越自己
           </p>
-          <p className="mt-4 text-sm text-muted-foreground">— 一位 2024 届的同学</p>
+          <p className="mt-4 text-sm text-muted-foreground/80">— Simon</p>
         </section>
       </main>
 
       <footer className="border-t border-border py-8 text-center text-xs text-muted-foreground">
-        © Sage · 别一个人扛
+        © Sage
       </footer>
     </div>
   );

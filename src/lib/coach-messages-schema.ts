@@ -3,8 +3,11 @@ import type { Database } from "@/integrations/supabase/types";
 
 type Client = SupabaseClient<Database>;
 
-/** True when coach_messages has review_subject + review_session_date (migration applied). */
-let cachedHasReviewColumns: boolean | null = null;
+/**
+ * Once a probe succeeds, we cache true for the session.
+ * We do not cache "columns missing": after a migration, the next probe must run without a full page reload.
+ */
+let confirmedReviewColumns: boolean | null = null;
 let probePromise: Promise<boolean> | null = null;
 
 function looksLikeMissingReviewColumnError(err: {
@@ -26,21 +29,23 @@ function looksLikeMissingReviewColumnError(err: {
  * If the probe fails for an unknown reason, we prefer legacy mode (narrower payloads) to avoid 400s.
  */
 export async function coachMessagesHasReviewColumns(client: Client): Promise<boolean> {
-  if (cachedHasReviewColumns !== null) return cachedHasReviewColumns;
+  if (confirmedReviewColumns === true) return true;
   if (!probePromise) {
     probePromise = (async () => {
-      const { error } = await client.from("coach_messages").select("review_subject").limit(1);
-      if (!error) {
-        cachedHasReviewColumns = true;
-        return true;
-      }
-      if (looksLikeMissingReviewColumnError(error)) {
-        cachedHasReviewColumns = false;
+      try {
+        const { error } = await client.from("coach_messages").select("review_subject").limit(1);
+        if (!error) {
+          confirmedReviewColumns = true;
+          return true;
+        }
+        if (looksLikeMissingReviewColumnError(error)) {
+          return false;
+        }
+        console.warn("[coach_messages] review column probe:", error.message);
         return false;
+      } finally {
+        probePromise = null;
       }
-      console.warn("[coach_messages] review column probe:", error.message);
-      cachedHasReviewColumns = false;
-      return false;
     })();
   }
   return probePromise;
@@ -48,7 +53,7 @@ export async function coachMessagesHasReviewColumns(client: Client): Promise<boo
 
 /** For tests or after applying DB migration without full reload (optional). */
 export function resetCoachMessagesSchemaCache() {
-  cachedHasReviewColumns = null;
+  confirmedReviewColumns = null;
   probePromise = null;
 }
 
