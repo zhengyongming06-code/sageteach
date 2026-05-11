@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet, Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { Calendar, MessageCircle, TrendingUp, LogOut } from "lucide-react";
+import { Calendar, MessageCircle, LogOut } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 
@@ -11,7 +11,6 @@ export const Route = createFileRoute("/_authenticated/app")({
 const tabs = [
   { to: "/app/today", label: "Today", icon: Calendar },
   { to: "/app/review", label: "Review", icon: MessageCircle },
-  { to: "/app/plan", label: "Score", icon: TrendingUp },
 ] as const;
 
 function AppShell() {
@@ -36,7 +35,7 @@ function AppShell() {
   }, [path, nav]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground md:flex">
         <Link to="/app/today" className="mb-8 flex items-center gap-2.5 px-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
@@ -76,14 +75,14 @@ function AppShell() {
         </div>
       </aside>
 
-      <main className="md:pl-60">
-        <div className="mx-auto max-w-5xl px-5 pb-28 pt-6 md:pb-12 md:pt-10">
+      <main className="flex min-h-0 flex-1 flex-col md:pl-60">
+        <div className="mx-auto flex min-h-0 max-w-5xl flex-1 flex-col px-5 pb-28 pt-6 md:pb-12 md:pt-10">
           <Outlet />
         </div>
       </main>
 
       <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden">
-        <div className="mx-auto grid max-w-lg grid-cols-3">
+        <div className="mx-auto grid max-w-lg grid-cols-2">
           {tabs.map((t) => {
             const active = path.startsWith(t.to);
             return (

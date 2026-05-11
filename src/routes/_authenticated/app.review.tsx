@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -7,6 +7,7 @@ import { SUBJECTS, type Subject } from "@/lib/subjects";
 import { SAGE_DEEPSEEK_SYSTEM_PROMPT, reviewContextSuffix } from "@/lib/sage-system-prompt";
 import { fetchDeepSeekReply } from "@/lib/deepseek";
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
+import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
   Select,
   SelectContent,
@@ -14,8 +15,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { coachMessagesHasReviewColumns, MIGRATION_HINT } from "@/lib/coach-messages-schema";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertCircle } from "lucide-react";
+import { REVIEW_FIRST_OPENING_MESSAGE } from "@/lib/review-opening";
+import {
+  formatReviewConversationForSummary,
+  requestReviewSummaryStructured,
+  userEndsReviewSession,
+} from "@/lib/review-summary";
 
 export const Route = createFileRoute("/_authenticated/app/review")({ component: Review });
 
@@ -34,6 +45,15 @@ function formatDateLabel(ymd: string) {
 
 type SessionRow = { id: string; session_date: string };
 
+type SessionCardState =
+  | null
+  | { kind: "full"; subject: string; weak_point: string; tonight_task: string; follow_up: string }
+  | { kind: "fallback" };
+
+function sessionKey(subject: string, date: string) {
+  return `${subject}::${date}`;
+}
+
 function Review() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -41,14 +61,95 @@ function Review() {
   const [selectedDate, setSelectedDate] = useState(() => localYmd());
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [sessionCard, setSessionCard] = useState<SessionCardState>(null);
+  const summaryDoneKeysRef = useRef(new Set<string>());
+  const openingFlightRef = useRef(false);
+  const subjectRef = useRef(subject);
+  const selectedDateRef = useRef(selectedDate);
+  subjectRef.current = subject;
+  selectedDateRef.current = selectedDate;
 
   useEffect(() => {
     setSelectedDate(localYmd());
   }, [subject]);
 
+  useEffect(() => {
+    setSessionCard(null);
+  }, [subject, selectedDate]);
+
+  const { data: hasReviewCols } = useQuery({
+    queryKey: ["coach-review-schema"],
+    enabled: !!user?.id,
+    staleTime: Infinity,
+    queryFn: () => coachMessagesHasReviewColumns(supabase),
+  });
+
+  const { data: hasAnyReviewMessages } = useQuery({
+    queryKey: ["review-prior-any", user?.id],
+    enabled: !!user?.id && hasReviewCols === true,
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("coach_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user!.id)
+        .not("review_subject", "is", null);
+      if (error) throw error;
+      return (count ?? 0) > 0;
+    },
+  });
+
+  useEffect(() => {
+    if (!user?.id || hasReviewCols !== true || hasAnyReviewMessages !== false) return;
+    if (openingFlightRef.current) return;
+    openingFlightRef.current = true;
+    let cancelled = false;
+    const uid = user.id;
+
+    void (async () => {
+      const { count, error: cErr } = await supabase
+        .from("coach_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", uid)
+        .not("review_subject", "is", null);
+      if (cancelled || cErr) {
+        openingFlightRef.current = false;
+        return;
+      }
+      if ((count ?? 0) > 0) {
+        openingFlightRef.current = false;
+        await qc.invalidateQueries({ queryKey: ["review-prior-any", uid] });
+        return;
+      }
+
+      const sub = subjectRef.current;
+      const dt = selectedDateRef.current;
+      const { error } = await supabase.from("coach_messages").insert({
+        user_id: uid,
+        role: "assistant",
+        content: REVIEW_FIRST_OPENING_MESSAGE,
+        review_subject: sub,
+        review_session_date: dt,
+      });
+      openingFlightRef.current = false;
+      if (cancelled || error) {
+        if (error) console.error(error);
+        return;
+      }
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["review-prior-any", uid] }),
+        qc.invalidateQueries({ queryKey: ["review-sessions", uid, sub] }),
+        qc.invalidateQueries({ queryKey: ["review-messages", uid, sub, dt] }),
+      ]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, hasReviewCols, hasAnyReviewMessages, qc]);
+
   const { data: sessions = [] } = useQuery({
     queryKey: ["review-sessions", user?.id, subject],
-    enabled: !!user?.id,
+    enabled: !!user?.id && hasReviewCols === true,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("coach_messages")
@@ -77,7 +178,7 @@ function Review() {
 
   const { data: messageRows = [] } = useQuery({
     queryKey: ["review-messages", user?.id, subject, selectedDate],
-    enabled: !!user?.id,
+    enabled: !!user?.id && hasReviewCols === true,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("coach_messages")
@@ -102,6 +203,11 @@ function Review() {
     [messageRows],
   );
 
+  const userMessageCount = useMemo(
+    () => messageRows.filter((m) => m.role === "user").length,
+    [messageRows],
+  );
+
   const dateOptions = useMemo(() => {
     const set = new Set<string>();
     for (const s of sessions) set.add(s.session_date);
@@ -109,6 +215,45 @@ function Review() {
     set.add(selectedDate);
     return [...set].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
   }, [sessions, selectedDate]);
+
+  const runSilentSummary = useCallback(
+    async (historyRows: { role: string; content: string }[]) => {
+      if (!user?.id) return;
+      const key = sessionKey(subject, selectedDate);
+      if (summaryDoneKeysRef.current.has(key)) return;
+
+      const transcript = formatReviewConversationForSummary(historyRows);
+      if (!transcript.trim()) return;
+
+      summaryDoneKeysRef.current.add(key);
+
+      try {
+        const parsed = await requestReviewSummaryStructured(transcript);
+        if (!parsed) throw new Error("parse");
+        const row = {
+          user_id: user.id,
+          session_date: selectedDate,
+          subject,
+          weak_point: parsed.weak_point,
+          tonight_task: parsed.tonight_task,
+          follow_up: parsed.follow_up,
+        };
+        setSessionCard({
+          kind: "full",
+          subject,
+          weak_point: parsed.weak_point,
+          tonight_task: parsed.tonight_task,
+          follow_up: parsed.follow_up,
+        });
+        const { error } = await supabase.from("review_summaries").insert(row);
+        if (error) console.error(error);
+        await qc.invalidateQueries({ queryKey: ["review-summaries", user.id] });
+      } catch {
+        setSessionCard({ kind: "fallback" });
+      }
+    },
+    [subject, selectedDate, user, qc],
+  );
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -118,6 +263,13 @@ function Review() {
     setDraft("");
 
     try {
+      const extended = await coachMessagesHasReviewColumns(supabase);
+      if (!extended) {
+        toast.error(MIGRATION_HINT);
+        return;
+      }
+      const keywordEnd = userEndsReviewSession(text);
+
       const { error: uErr } = await supabase.from("coach_messages").insert({
         user_id: user.id,
         role: "user",
@@ -130,7 +282,7 @@ function Review() {
       await qc.invalidateQueries({ queryKey: ["review-sessions", user.id, subject] });
       await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subject, selectedDate] });
 
-      const { data: history, error: hErr } = await supabase
+      const { data: historyAfterUser, error: h0Err } = await supabase
         .from("coach_messages")
         .select("role,content")
         .eq("user_id", user.id)
@@ -138,12 +290,15 @@ function Review() {
         .eq("review_session_date", selectedDate)
         .in("role", ["user", "assistant"])
         .order("created_at", { ascending: true });
-      if (hErr) throw hErr;
+      if (h0Err) throw h0Err;
+
+      const userCountAfter = (historyAfterUser ?? []).filter((m) => m.role === "user").length;
+      const shouldSummarizeAfterTurn = keywordEnd || userCountAfter >= 8;
 
       const sys = SAGE_DEEPSEEK_SYSTEM_PROMPT + reviewContextSuffix(subject, selectedDate);
       const apiMessages = [
         { role: "system" as const, content: sys },
-        ...(history ?? []).map((m) => ({
+        ...(historyAfterUser ?? []).map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
@@ -162,22 +317,67 @@ function Review() {
 
       await qc.invalidateQueries({ queryKey: ["review-sessions", user.id, subject] });
       await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subject, selectedDate] });
+
+      const { data: fullHistory, error: h1Err } = await supabase
+        .from("coach_messages")
+        .select("role,content")
+        .eq("user_id", user.id)
+        .eq("review_subject", subject)
+        .eq("review_session_date", selectedDate)
+        .in("role", ["user", "assistant"])
+        .order("created_at", { ascending: true });
+      if (h1Err) throw h1Err;
+
+      if (shouldSummarizeAfterTurn) {
+        void runSilentSummary(fullHistory ?? []);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "发送失败";
       toast.error(msg);
     } finally {
       setIsSending(false);
     }
-  }, [draft, user?.id, isSending, subject, selectedDate, qc]);
+  }, [draft, user?.id, isSending, subject, selectedDate, qc, runSilentSummary]);
+
+  const onEndReviewClick = useCallback(() => {
+    if (userMessageCount < 3) return;
+    void runSilentSummary(messageRows.map((m) => ({ role: m.role, content: m.content })));
+  }, [userMessageCount, messageRows, runSilentSummary]);
+
+  const summaryBelow = sessionCard ? (
+    <ReviewSummaryCard
+      variant={sessionCard.kind === "fallback" ? "fallback" : "full"}
+      subject={sessionCard.kind === "full" ? sessionCard.subject : undefined}
+      weakPoint={sessionCard.kind === "full" ? sessionCard.weak_point : undefined}
+      tonightTask={sessionCard.kind === "full" ? sessionCard.tonight_task : undefined}
+      followUp={sessionCard.kind === "full" ? sessionCard.follow_up : undefined}
+    />
+  ) : null;
 
   return (
     <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-5 pb-2 md:min-h-[calc(100dvh-7rem)]">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          选一科，和 Sage 聊聊今天哪里卡住——用问题把模糊变成具体。
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            选一科，和 Sage 聊聊今天哪里卡住——用问题把模糊变成具体。
+          </p>
+        </div>
+        <Link
+          to="/app/review/archive"
+          className="shrink-0 text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          查看我的弱点档案
+        </Link>
       </header>
+
+      {hasReviewCols === false && (
+        <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>需要数据库迁移</AlertTitle>
+          <AlertDescription className="text-sm">{MIGRATION_HINT}</AlertDescription>
+        </Alert>
+      )}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <aside className="lg:w-52 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
@@ -266,17 +466,35 @@ function Review() {
             </p>
           )}
 
-          <SageChatPanel
-            messages={messages}
-            draft={draft}
-            onDraftChange={setDraft}
-            onSubmit={() => void send()}
-            isSending={isSending}
-            emptyTitle="从这里开始复盘"
-            emptyHint="说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
-            placeholder={`聊聊今天的「${subject}」…`}
-            className="min-h-[320px] md:min-h-[420px]"
-          />
+          <div className={cn(hasReviewCols === false && "pointer-events-none opacity-40")}>
+            <SageChatPanel
+              messages={messages}
+              draft={draft}
+              onDraftChange={setDraft}
+              onSubmit={() => void send()}
+              isSending={isSending}
+              emptyTitle="从这里开始复盘"
+              emptyHint="说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
+              placeholder={
+                hasReviewCols === false ? "请先完成上方数据库迁移" : `聊聊今天的「${subject}」…`
+              }
+              className="min-h-[320px] md:min-h-[420px]"
+              betweenScrollAndInput={
+                hasReviewCols === true && userMessageCount >= 3 ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full rounded-xl border-dashed"
+                    onClick={onEndReviewClick}
+                  >
+                    结束复盘
+                  </Button>
+                ) : null
+              }
+              belowForm={summaryBelow}
+            />
+          </div>
         </div>
       </div>
     </div>

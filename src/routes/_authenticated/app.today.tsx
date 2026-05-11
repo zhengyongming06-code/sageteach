@@ -1,50 +1,93 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getTodayPlan, type PlanShape } from "@/lib/plan.functions";
+import { useCallback, useEffect, useRef, useState, type HTMLAttributes } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { Button } from "@/components/ui/button";
-import { Sparkles, Clock, Target, AlertCircle } from "lucide-react";
+import { Sparkles, Clock, Target } from "lucide-react";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
-import { SAGE_DEEPSEEK_SYSTEM_PROMPT, TODAY_PAGE_CONTEXT_SUFFIX } from "@/lib/sage-system-prompt";
+import { Input } from "@/components/ui/input";
+import {
+  SAGE_DEEPSEEK_SYSTEM_PROMPT,
+  TODAY_INLINE_OPENING,
+  TODAY_PAGE_CONTEXT_SUFFIX,
+} from "@/lib/sage-system-prompt";
 import { fetchDeepSeekReply } from "@/lib/deepseek";
+import { coachMessagesHasReviewColumns } from "@/lib/coach-messages-schema";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/app/today")({ component: Today });
 
+type ProfileRow = {
+  display_name?: string | null;
+  current_score?: number | null;
+  target_score?: number | null;
+  exam_date?: string | null;
+};
+
+type EditingField = "target" | "current" | "exam" | null;
+
+function daysUntilExam(examDate: string | null | undefined): number | null {
+  if (examDate == null || examDate === "") return null;
+  const t = new Date(examDate + "T12:00:00");
+  if (Number.isNaN(t.getTime())) return null;
+  return Math.max(0, Math.ceil((t.getTime() - Date.now()) / 86400000));
+}
+
+function addDaysToTodayIso(days: number): string {
+  const t = new Date();
+  t.setHours(12, 0, 0, 0);
+  t.setDate(t.getDate() + Math.max(0, Math.floor(days)));
+  const y = t.getFullYear();
+  const m = String(t.getMonth() + 1).padStart(2, "0");
+  const d = String(t.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function Today() {
   const { user } = useAuth();
-  const get = useServerFn(getTodayPlan);
   const qc = useQueryClient();
-  const [profile, setProfile] = useState<{
-    display_name?: string | null;
-    current_score?: number | null;
-    target_score?: number | null;
-    exam_date?: string | null;
-  } | null>(null);
-  const [showChat, setShowChat] = useState(false);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [editing, setEditing] = useState<EditingField>(null);
+  const [editDraft, setEditDraft] = useState("");
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const openingSeedStarted = useRef(false);
+  const skipBlurSave = useRef(false);
 
-  useEffect(() => {
+  const loadProfile = useCallback(async () => {
     if (!user) return;
-    supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("display_name,current_score,target_score,exam_date")
       .eq("id", user.id)
-      .maybeSingle()
-      .then(({ data }) => setProfile(data));
+      .maybeSingle();
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setProfile(data);
   }, [user]);
 
-  const { data, isLoading } = useQuery({ queryKey: ["today-plan"], queryFn: () => get() });
+  useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
 
-  const { data: coachRows = [] } = useQuery({
+  const { data: coachRows = [], isSuccess } = useQuery({
     queryKey: ["today-coach-chat", user?.id],
-    enabled: !!user?.id && showChat,
+    enabled: !!user?.id,
     queryFn: async () => {
+      const extended = await coachMessagesHasReviewColumns(supabase);
+      if (!extended) {
+        const { data: rows, error } = await supabase
+          .from("coach_messages")
+          .select("id,role,content,created_at")
+          .eq("user_id", user!.id)
+          .order("created_at", { ascending: true })
+          .limit(120);
+        if (error) throw error;
+        return rows ?? [];
+      }
       const { data: rows, error } = await supabase
         .from("coach_messages")
         .select("id,role,content,created_at,review_subject,review_session_date")
@@ -58,23 +101,56 @@ function Today() {
     },
   });
 
-  const coachMessages: SageChatMessage[] = useMemo(
-    () =>
-      (coachRows ?? [])
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({
-          id: m.id,
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-    [coachRows],
-  );
+  const coachMessages: SageChatMessage[] = (coachRows ?? [])
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      id: m.id,
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
 
-  const plan: PlanShape | null = data?.plan ?? null;
-  const days =
-    profile?.exam_date !== null && profile?.exam_date !== undefined
-      ? Math.max(0, Math.ceil((new Date(profile.exam_date).getTime() - Date.now()) / 86400000))
-      : null;
+  useEffect(() => {
+    if (!user?.id || !isSuccess) return;
+    if (coachRows.length > 0) return;
+    if (typeof window === "undefined") return;
+    const key = `sage-today-opening-${user.id}`;
+    if (sessionStorage.getItem(key)) return;
+    if (openingSeedStarted.current) return;
+    openingSeedStarted.current = true;
+    let cancelled = false;
+    void (async () => {
+      const extended = await coachMessagesHasReviewColumns(supabase);
+      const { error } = await supabase.from("coach_messages").insert(
+        extended
+          ? {
+              user_id: user.id,
+              role: "assistant",
+              content: TODAY_INLINE_OPENING,
+              review_subject: null,
+              review_session_date: null,
+            }
+          : {
+              user_id: user.id,
+              role: "assistant",
+              content: TODAY_INLINE_OPENING,
+            },
+      );
+      if (cancelled || error) {
+        openingSeedStarted.current = false;
+        if (error) toast.error(error.message);
+        return;
+      }
+      sessionStorage.setItem(key, "1");
+      openingSeedStarted.current = false;
+      await qc.invalidateQueries({ queryKey: ["today-coach-chat", user.id] });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, isSuccess, coachRows.length, qc]);
+
+  const days = daysUntilExam(profile?.exam_date);
+
   const hour = new Date().getHours();
   const greet =
     hour < 6
@@ -87,6 +163,83 @@ function Today() {
             ? "下午好"
             : "晚上好";
 
+  const beginEdit = (field: NonNullable<EditingField>) => {
+    setEditing(field);
+    if (field === "target") {
+      setEditDraft(profile?.target_score != null ? String(profile.target_score) : "");
+    } else if (field === "current") {
+      setEditDraft(profile?.current_score != null ? String(profile.current_score) : "");
+    } else {
+      setEditDraft(days != null ? String(days) : "");
+    }
+  };
+
+  const cancelEdit = () => {
+    skipBlurSave.current = true;
+    setEditing(null);
+    setEditDraft("");
+  };
+
+  const saveField = useCallback(
+    async (field: NonNullable<EditingField>) => {
+      if (skipBlurSave.current) {
+        skipBlurSave.current = false;
+        return;
+      }
+      if (!user?.id || editing !== field) return;
+      try {
+        if (field === "target") {
+          const v = editDraft.trim();
+          const n = v === "" ? null : parseInt(v, 10);
+          if (v !== "" && (Number.isNaN(n) || n < 0 || n > 900)) {
+            toast.error("请输入 0–900 之间的目标分，或留空");
+            return;
+          }
+          const { error } = await supabase
+            .from("profiles")
+            .update({ target_score: n })
+            .eq("id", user.id);
+          if (error) throw error;
+          setProfile((p) => (p ? { ...p, target_score: n } : p));
+        } else if (field === "current") {
+          const v = editDraft.trim();
+          const n = v === "" ? null : parseInt(v, 10);
+          if (v !== "" && (Number.isNaN(n) || n < 0 || n > 900)) {
+            toast.error("请输入 0–900 之间的分数，或留空");
+            return;
+          }
+          const { error } = await supabase
+            .from("profiles")
+            .update({ current_score: n })
+            .eq("id", user.id);
+          if (error) throw error;
+          setProfile((p) => (p ? { ...p, current_score: n } : p));
+        } else {
+          const v = editDraft.trim();
+          let exam_date: string | null;
+          if (v === "") {
+            exam_date = null;
+          } else {
+            const n = parseInt(v, 10);
+            if (Number.isNaN(n) || n < 0 || n > 2000) {
+              toast.error("请输入距考试的天数（0 以上），或留空清除");
+              return;
+            }
+            exam_date = addDaysToTodayIso(n);
+          }
+          const { error } = await supabase.from("profiles").update({ exam_date }).eq("id", user.id);
+          if (error) throw error;
+          setProfile((p) => (p ? { ...p, exam_date } : p));
+        }
+        setEditing(null);
+        setEditDraft("");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "保存失败");
+      }
+    },
+    [user?.id, editing, editDraft],
+  );
+
   const sendCoach = useCallback(async () => {
     const text = draft.trim();
     if (!text || !user?.id || isSending) return;
@@ -94,31 +247,40 @@ function Today() {
     setIsSending(true);
     setDraft("");
 
+    const d = daysUntilExam(profile?.exam_date);
+
     try {
+      const extended = await coachMessagesHasReviewColumns(supabase);
       const sys =
         SAGE_DEEPSEEK_SYSTEM_PROMPT +
         TODAY_PAGE_CONTEXT_SUFFIX +
-        `\n学生档案：目标分 ${profile?.target_score ?? "—"}，当前分 ${profile?.current_score ?? "—"}，距离考试 ${days === null ? "—" : `${days} 天`}。`;
+        `\n学生档案：目标分 ${profile?.target_score ?? "—"}，当前分 ${profile?.current_score ?? "—"}，距离考试 ${d === null ? "—" : `${d} 天`}。`;
 
-      const { error: uErr } = await supabase.from("coach_messages").insert({
-        user_id: user.id,
-        role: "user",
-        content: text,
-        review_subject: null,
-        review_session_date: null,
-      });
+      const { error: uErr } = await supabase.from("coach_messages").insert(
+        extended
+          ? {
+              user_id: user.id,
+              role: "user",
+              content: text,
+              review_subject: null,
+              review_session_date: null,
+            }
+          : { user_id: user.id, role: "user", content: text },
+      );
       if (uErr) throw uErr;
 
       await qc.invalidateQueries({ queryKey: ["today-coach-chat", user.id] });
 
-      const { data: history, error: hErr } = await supabase
+      let historyQuery = supabase
         .from("coach_messages")
         .select("role,content")
         .eq("user_id", user.id)
-        .is("review_subject", null)
-        .is("review_session_date", null)
         .order("created_at", { ascending: true })
         .limit(120);
+      if (extended) {
+        historyQuery = historyQuery.is("review_subject", null).is("review_session_date", null);
+      }
+      const { data: history, error: hErr } = await historyQuery;
       if (hErr) throw hErr;
 
       const thread = (history ?? []).filter((m) => m.role === "user" || m.role === "assistant");
@@ -132,13 +294,17 @@ function Today() {
 
       const reply = await fetchDeepSeekReply(apiMessages);
 
-      const { error: aErr } = await supabase.from("coach_messages").insert({
-        user_id: user.id,
-        role: "assistant",
-        content: reply,
-        review_subject: null,
-        review_session_date: null,
-      });
+      const { error: aErr } = await supabase.from("coach_messages").insert(
+        extended
+          ? {
+              user_id: user.id,
+              role: "assistant",
+              content: reply,
+              review_subject: null,
+              review_session_date: null,
+            }
+          : { user_id: user.id, role: "assistant", content: reply },
+      );
       if (aErr) throw aErr;
 
       await qc.invalidateQueries({ queryKey: ["today-coach-chat", user.id] });
@@ -148,112 +314,166 @@ function Today() {
     } finally {
       setIsSending(false);
     }
-  }, [draft, user?.id, isSending, profile, days, qc]);
+  }, [draft, user?.id, isSending, profile, qc]);
 
   return (
-    <div className="space-y-6">
-      <header>
+    <div className="flex min-h-0 flex-1 flex-col gap-5">
+      <header className="shrink-0">
         <p className="text-sm text-muted-foreground">{greet}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">今天，从最重要的一件事开始。</h1>
       </header>
 
-      <div className="grid grid-cols-3 gap-3">
-        <Stat
+      <div className="grid shrink-0 grid-cols-3 gap-3">
+        <StatCard
           icon={Target}
           label="目标分"
-          value={profile?.target_score ? `${profile.target_score}` : "—"}
+          display={profile?.target_score != null ? `${profile.target_score}` : "—"}
+          hint="点击编辑"
+          active={editing === "target"}
+          draft={editDraft}
+          onDraftChange={setEditDraft}
+          onActivate={() => beginEdit("target")}
+          onSave={() => void saveField("target")}
+          onCancel={cancelEdit}
+          inputMode="numeric"
+          placeholder="分数"
         />
-        <Stat
+        <StatCard
           icon={Sparkles}
           label="当前分"
-          value={profile?.current_score ? `${profile.current_score}` : "—"}
+          display={profile?.current_score != null ? `${profile.current_score}` : "—"}
+          hint="点击编辑"
+          active={editing === "current"}
+          draft={editDraft}
+          onDraftChange={setEditDraft}
+          onActivate={() => beginEdit("current")}
+          onSave={() => void saveField("current")}
+          onCancel={cancelEdit}
+          inputMode="numeric"
+          placeholder="分数"
         />
-        <Stat icon={Clock} label="距考试" value={days !== null ? `${days} 天` : "—"} />
+        <StatCard
+          icon={Clock}
+          label="距考试"
+          display={days != null ? `${days} 天` : "—"}
+          hint="点击编辑天数"
+          active={editing === "exam"}
+          draft={editDraft}
+          onDraftChange={setEditDraft}
+          onActivate={() => beginEdit("exam")}
+          onSave={() => void saveField("exam")}
+          onCancel={cancelEdit}
+          inputMode="numeric"
+          placeholder="天数"
+        />
       </div>
 
-      {plan ? (
-        <section className="rounded-3xl border border-border bg-card p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">今日计划</h2>
-          {isLoading ? (
-            <p className="mt-6 text-sm text-muted-foreground">加载中…</p>
-          ) : (
-            <div className="mt-5 space-y-4">
-              <p className="text-balance text-base font-medium">{plan.focus}</p>
-              <ul className="space-y-2">
-                {plan.tasks?.map((t, i) => (
-                  <motion.li
-                    key={i}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    className="rounded-2xl border border-border bg-background p-4"
-                  >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <div className="flex items-baseline gap-2">
-                        <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                          {t.subject}
-                        </span>
-                        <span className="font-medium">{t.title}</span>
-                      </div>
-                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                        {t.minutes} 分
-                      </span>
-                    </div>
-                    {t.why && <p className="mt-1.5 text-sm text-muted-foreground">{t.why}</p>}
-                  </motion.li>
-                ))}
-              </ul>
-              {plan.warning && (
-                <div className="flex items-start gap-2 rounded-2xl bg-warm p-4 text-sm text-warm-foreground">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {plan.warning}
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      <div className="flex flex-col gap-3">
-        <Button
-          type="button"
-          variant={showChat ? "secondary" : "default"}
-          onClick={() => setShowChat((v) => !v)}
-          className="h-12 w-full rounded-2xl text-base sm:w-auto sm:min-w-[200px]"
-        >
-          {showChat ? "收起对话" : "让 AI 安排"}
-        </Button>
-
-        {showChat && (
-          <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
-            <p className="mb-3 text-sm text-muted-foreground">
-              和 Sage 说说今天的状态，一起定今天最值得先做的一件事。
-            </p>
-            <SageChatPanel
-              messages={coachMessages}
-              draft={draft}
-              onDraftChange={setDraft}
-              onSubmit={() => void sendCoach()}
-              isSending={isSending}
-              emptyTitle="从这里开始"
-              emptyHint="可以是一句拖延、一门最不想碰的科目，或一个具体目标。"
-              placeholder="说说今天想怎么学…"
-              className="min-h-[260px]"
-            />
-          </div>
-        )}
-      </div>
+      <section className="flex min-h-0 flex-1 flex-col rounded-3xl border border-border bg-card p-4 shadow-sm">
+        <SageChatPanel
+          messages={coachMessages}
+          draft={draft}
+          onDraftChange={setDraft}
+          onSubmit={() => void sendCoach()}
+          isSending={isSending}
+          emptyTitle="加载对话…"
+          emptyHint=""
+          placeholder="和 Sage 聊聊今天…"
+          expand
+          className="min-h-0"
+        />
+      </section>
     </div>
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: typeof Target; label: string; value: string }) {
+function StatCard({
+  icon: Icon,
+  label,
+  display,
+  hint,
+  active,
+  draft,
+  onDraftChange,
+  onActivate,
+  onSave,
+  onCancel,
+  inputMode,
+  placeholder,
+}: {
+  icon: typeof Target;
+  label: string;
+  display: string;
+  hint: string;
+  active: boolean;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onActivate: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"];
+  placeholder: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (active) {
+      queueMicrotask(() => inputRef.current?.focus());
+      inputRef.current?.select();
+    }
+  }, [active]);
+
   return (
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        if (!active) onActivate();
+      }}
+      onKeyDown={(e) => {
+        if (!active && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onActivate();
+        }
+      }}
+      className={cn(
+        "rounded-2xl border border-border bg-card p-4 text-left outline-none transition hover:border-ring/40 focus-visible:ring-2 focus-visible:ring-ring",
+        active && "border-ring ring-1 ring-ring",
+      )}
+    >
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Icon className="h-3.5 w-3.5" />
         {label}
       </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+      {active ? (
+        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+          <Input
+            ref={inputRef}
+            type="text"
+            inputMode={inputMode}
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            placeholder={placeholder}
+            className="h-9 rounded-xl text-lg font-semibold tabular-nums"
+            onBlur={() => void onSave()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void onSave();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onCancel();
+              }
+            }}
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">Enter 保存 · Esc 取消</p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-1 text-xl font-semibold tabular-nums">{display}</div>
+          <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p>
+        </>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Send } from "lucide-react";
@@ -20,6 +20,12 @@ type SageChatPanelProps = {
   emptyHint: string;
   placeholder?: string;
   className?: string;
+  /** Fill parent flex column (scroll area grows, min-h-0). */
+  expand?: boolean;
+  /** Rendered between the message list and the composer (e.g. actions). */
+  betweenScrollAndInput?: ReactNode;
+  /** Rendered after the composer (e.g. summary cards). */
+  belowForm?: ReactNode;
 };
 
 export function SageChatPanel({
@@ -32,6 +38,9 @@ export function SageChatPanel({
   emptyHint,
   placeholder = "输入消息…",
   className = "",
+  expand = false,
+  betweenScrollAndInput,
+  belowForm,
 }: SageChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const empty = messages.length === 0 && !isSending;
@@ -44,10 +53,16 @@ export function SageChatPanel({
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
       <div
         ref={scrollRef}
-        className="min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]"
+        className={
+          expand
+            ? "min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4"
+            : "min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]"
+        }
       >
         {empty && (
-          <div className="grid h-full min-h-[180px] place-items-center px-4 text-center">
+          <div
+            className={`grid place-items-center px-4 text-center ${expand ? "min-h-[min(40vh,240px)]" : "h-full min-h-[180px]"}`}
+          >
             <div>
               <p className="text-[15px] text-foreground">{emptyTitle}</p>
               <p className="mt-2 text-sm text-muted-foreground">{emptyHint}</p>
@@ -89,6 +104,8 @@ export function SageChatPanel({
         )}
       </div>
 
+      {betweenScrollAndInput ? <div className="mt-3 shrink-0">{betweenScrollAndInput}</div> : null}
+
       <form
         className="mt-3 flex items-end gap-2"
         onSubmit={(e) => {
@@ -117,6 +134,8 @@ export function SageChatPanel({
           <Send className="h-4 w-4" />
         </Button>
       </form>
+
+      {belowForm ? <div className="mt-4 shrink-0">{belowForm}</div> : null}
     </div>
   );
 }
