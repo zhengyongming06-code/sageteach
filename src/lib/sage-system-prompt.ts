@@ -18,3 +18,6 @@ export function reviewContextSuffix(subject: string, sessionDate: string) {
 }
 
 export const TODAY_PAGE_CONTEXT_SUFFIX = `\n\n当前场景：学生在「今日」首页，希望你能结合 Ta 的目标分、当前分和备考节奏，一起商量今天最值得先做什么。仍遵守上述原则与字数限制。`;
+
+/** First assistant line on Today inline chat (lightweight, no subject picker). */
+export const TODAY_INLINE_OPENING = "你今天准备复盘哪科？或者有什么卡住了想聊聊？";

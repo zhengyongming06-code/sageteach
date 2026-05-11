@@ -137,6 +137,39 @@ export type Database = {
         }
         Relationships: []
       }
+      review_summaries: {
+        Row: {
+          created_at: string
+          follow_up: string
+          id: string
+          session_date: string
+          subject: string
+          tonight_task: string
+          user_id: string
+          weak_point: string
+        }
+        Insert: {
+          created_at?: string
+          follow_up: string
+          id?: string
+          session_date?: string
+          subject: string
+          tonight_task: string
+          user_id: string
+          weak_point: string
+        }
+        Update: {
+          created_at?: string
+          follow_up?: string
+          id?: string
+          session_date?: string
+          subject?: string
+          tonight_task?: string
+          user_id?: string
+          weak_point?: string
+        }
+        Relationships: []
+      }
       reflections: {
         Row: {
           ai_diagnosis: string | null
