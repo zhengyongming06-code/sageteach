@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState, type HTMLAttributes } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -11,6 +11,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { subjectAccentCardClass, subjectBadgeClass } from "@/lib/subject-accent";
 import { fetchWeakArchive, formatArchiveDateLabel, persistTaskCompletion, type WeakArchiveRow } from "@/lib/weak-archive";
+import { fetchUserExams, pickNearestExam, syncProfileNearestExam, type UserExamRow } from "@/lib/user-exams";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+// import { DailyQuestionCard } from "@/components/daily-question-card";
 
 export const Route = createFileRoute("/_authenticated/app/today")({ component: Today });
 
@@ -50,15 +59,17 @@ async function fetchPendingSageHook(userId: string): Promise<string | null> {
   const todayYmd = localYmd();
   const { data, error } = await supabase
     .from("review_summaries")
-    .select("follow_up,created_at,session_date")
+    .select("follow_up")
     .eq("user_id", userId)
     .not("follow_up", "is", null)
+    .neq("follow_up", "")
     .lt("session_date", todayYmd)
     .order("created_at", { ascending: false })
-    .limit(8);
+    .limit(1)
+    .maybeSingle();
   if (error) throw error;
-  const row = (data ?? []).find((r) => String(r.follow_up ?? "").trim() !== "");
-  return row?.follow_up?.trim() ?? null;
+  const t = data?.follow_up?.trim();
+  return t && t.length > 0 ? t : null;
 }
 
 type ProfileRow = {
@@ -69,17 +80,7 @@ type ProfileRow = {
 
 type EditingField = "target" | "current" | null;
 
-/** Days from local today to next June 7 (this year, or next if June 7 already passed). */
-function daysUntilGaokaoJune7(): number {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const y = now.getFullYear();
-  let target = new Date(y, 5, 7);
-  if (today.getTime() > target.getTime()) {
-    target = new Date(y + 1, 5, 7);
-  }
-  return Math.round((target.getTime() - today.getTime()) / 86400000);
-}
+const SPRINT_EXAM_MAX_DAYS = 30;
 
 type TodayTaskRow = {
   id: string;
@@ -88,7 +89,8 @@ type TodayTaskRow = {
   completed: boolean;
 };
 
-async function fetchTodayTasks(userId: string): Promise<TodayTaskRow[]> {
+async function fetchTodayTasks(userId: string, opts?: { limit?: number }): Promise<TodayTaskRow[]> {
+  const cap = opts?.limit ?? 3;
   const { data: summaries, error: sErr } = await supabase
     .from("review_summaries")
     .select("id,subject,tonight_task,created_at")
@@ -97,9 +99,9 @@ async function fetchTodayTasks(userId: string): Promise<TodayTaskRow[]> {
     .limit(24);
   if (sErr) throw sErr;
   const trimmed = (summaries ?? []).filter((r) => String(r.tonight_task ?? "").trim() !== "");
-  const top3 = trimmed.slice(0, 3);
-  if (top3.length === 0) return [];
-  const ids = top3.map((r) => r.id);
+  const top = trimmed.slice(0, cap);
+  if (top.length === 0) return [];
+  const ids = top.map((r) => r.id);
   const { data: comps, error: cErr } = await supabase
     .from("task_completions")
     .select("review_summary_id,completed")
@@ -107,7 +109,7 @@ async function fetchTodayTasks(userId: string): Promise<TodayTaskRow[]> {
     .in("review_summary_id", ids);
   if (cErr) throw cErr;
   const map = new Map((comps ?? []).map((c) => [c.review_summary_id, c.completed]));
-  return top3.map((r) => ({
+  return top.map((r) => ({
     id: r.id,
     subject: r.subject,
     tonight_task: String(r.tonight_task).trim(),
@@ -126,8 +128,56 @@ function Today() {
   const [archiveCelebrateId, setArchiveCelebrateId] = useState<string | null>(null);
   const celebrateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const gaokaoDays = daysUntilGaokaoJune7();
-  const gaokaoUrgent = gaokaoDays >= 0 && gaokaoDays < 7;
+  const { data: examRows = [] } = useQuery({
+    queryKey: ["user-exams", user?.id],
+    enabled: !!user?.id,
+    queryFn: () => fetchUserExams(user!.id),
+    staleTime: 30_000,
+  });
+
+  const nearestExam = useMemo(() => pickNearestExam(examRows), [examRows]);
+  const examCountdownDays = nearestExam?.days ?? null;
+  const examCountdownName = nearestExam?.row.name ?? "考试";
+  const examUrgent = examCountdownDays !== null && examCountdownDays >= 0 && examCountdownDays < 7;
+  const examSprint =
+    examCountdownDays !== null && examCountdownDays >= 0 && examCountdownDays <= SPRINT_EXAM_MAX_DAYS;
+
+  const [examScheduleOpen, setExamScheduleOpen] = useState(false);
+
+  const {
+    data: profileFlags,
+    isSuccess: profileFlagsReady,
+    isError: profileFlagsError,
+  } = useQuery({
+    queryKey: ["profile-flags", user?.id],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("review_onboarding_complete")
+        .eq("id", user!.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as { review_onboarding_complete: boolean } | null;
+    },
+  });
+
+  const [loadDeadlinePassed, setLoadDeadlinePassed] = useState(false);
+  useEffect(() => {
+    if (!user?.id) {
+      setLoadDeadlinePassed(false);
+      return;
+    }
+    setLoadDeadlinePassed(false);
+    const t = window.setTimeout(() => setLoadDeadlinePassed(true), 3000);
+    return () => window.clearTimeout(t);
+  }, [user?.id]);
+
+  const profileGateReady = profileFlagsReady || profileFlagsError || loadDeadlinePassed;
+  const profileFlagsResolved = profileFlagsReady || profileFlagsError;
+  const reviewOnboardingDone =
+    profileFlags?.review_onboarding_complete === true ||
+    (loadDeadlinePassed && !profileFlagsResolved);
 
   const { data: summaryCount, isSuccess: summaryCountReady, isError: summaryCountError } = useQuery({
     queryKey: ["review-summary-meta", user?.id],
@@ -143,10 +193,10 @@ function Today() {
   });
 
   useEffect(() => {
-    if (!summaryCountReady || summaryCountError) return;
-    if (summaryCount > 0) return;
+    if (!profileGateReady || profileFlagsError) return;
+    if (reviewOnboardingDone) return;
     nav({ to: "/app/review", replace: true });
-  }, [summaryCountReady, summaryCountError, summaryCount, nav]);
+  }, [profileGateReady, profileFlagsError, reviewOnboardingDone, nav]);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -154,7 +204,8 @@ function Today() {
       void qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] });
       void qc.invalidateQueries({ queryKey: ["today-tasks", user.id] });
       void qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] });
-      void qc.invalidateQueries({ queryKey: ["today-sage-hook", user.id] });
+      void qc.invalidateQueries({ queryKey: ["user-exams", user.id] });
+      // void qc.invalidateQueries({ queryKey: ["daily-question", user.id] });
     };
     window.addEventListener("sage-weak-archive-refresh", onRefresh);
     return () => window.removeEventListener("sage-weak-archive-refresh", onRefresh);
@@ -183,9 +234,9 @@ function Today() {
     isLoading: tasksLoading,
     isError: tasksError,
   } = useQuery({
-    queryKey: ["today-tasks", user?.id],
+    queryKey: ["today-tasks", user?.id, examSprint ? 1 : 3],
     enabled: !!user?.id,
-    queryFn: () => fetchTodayTasks(user!.id),
+    queryFn: () => fetchTodayTasks(user!.id, { limit: examSprint ? 1 : 3 }),
   });
 
   const {
@@ -212,7 +263,7 @@ function Today() {
     refetchIntervalInBackground: true,
   });
 
-  const { data: pendingFollowUp, isLoading: hookLoading } = useQuery({
+  const { data: pendingFollowUp } = useQuery({
     queryKey: ["today-sage-hook", user?.id],
     enabled: !!user?.id,
     queryFn: () => fetchPendingSageHook(user!.id),
@@ -352,7 +403,15 @@ function Today() {
     [toggleTaskComplete],
   );
 
-  if (summaryCountReady && !summaryCountError && summaryCount === 0) {
+  if (!profileGateReady) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center text-sm text-muted-foreground">
+        <p>加载中…</p>
+      </div>
+    );
+  }
+
+  if (!profileFlagsError && !reviewOnboardingDone) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center text-sm text-muted-foreground">
         <p>正在带你去复盘页…</p>
@@ -360,11 +419,20 @@ function Today() {
     );
   }
 
+  // const showDailyQuestion = summaryCountReady && !summaryCountError && (summaryCount ?? 0) > 0;
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-6">
+    <div className="flex min-h-0 flex-1 flex-col gap-6 bg-[#FFFFFF]">
       <header className="shrink-0">
         <p className="text-sm text-muted-foreground">{greet}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">今天，从最重要的一件事开始。</h1>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+          {examSprint ? `还有 ${examCountdownDays} 天。今天只做一件事。` : "今天，从最重要的一件事开始。"}
+        </h1>
+        {examSprint ? (
+          <span className="mt-2 inline-flex rounded-full border border-amber-400/70 bg-amber-100/90 px-3 py-0.5 text-xs font-semibold text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-50">
+            冲刺模式
+          </span>
+        ) : null}
       </header>
 
       <div className="grid shrink-0 grid-cols-3 gap-3">
@@ -396,7 +464,12 @@ function Today() {
           inputMode="numeric"
           placeholder="分数"
         />
-        <GaokaoCountdownCard days={gaokaoDays} urgent={gaokaoUrgent} />
+        <ExamCountdownCard
+          examName={examCountdownName}
+          days={examCountdownDays}
+          urgent={examUrgent}
+          onOpenSchedule={() => setExamScheduleOpen(true)}
+        />
       </div>
 
       <section
@@ -405,26 +478,41 @@ function Today() {
       >
         {dailyProgressError ? (
           <span className="text-destructive">今日进度加载失败</span>
-        ) : dailyProgressLoading || !dailyProgress ? (
+        ) : dailyProgress != null ? (
+          <span className="font-medium tabular-nums">
+            今日复盘 {dailyProgress.subjectCount} 科 · 卡点攻克 {dailyProgress.clearedCount} 个
+          </span>
+        ) : loadDeadlinePassed && dailyProgressLoading ? (
+          <span className="text-muted-foreground">今日进度加载较慢，可稍后再试或刷新页面。</span>
+        ) : dailyProgressLoading ? (
           <span className="text-muted-foreground">今日进度加载中…</span>
         ) : (
           <span className="font-medium tabular-nums">
-            今日复盘 {dailyProgress.subjectCount} 科 · 卡点攻克 {dailyProgress.clearedCount} 个
+            今日复盘 0 科 · 卡点攻克 0 个
           </span>
         )}
       </section>
 
-      {!hookLoading && pendingFollowUp ? (
-        <section className="shrink-0 rounded-3xl border border-primary/20 bg-primary/[0.06] p-4 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-primary/80">Sage 在等你</p>
-          <p className="mt-2 text-sm leading-relaxed text-foreground">
-            Sage 在等你汇报：{pendingFollowUp}
+      {pendingFollowUp ? (
+        <section
+          className="shrink-0 rounded-3xl border border-amber-200/70 bg-amber-50/90 p-4 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/30"
+          aria-label="Sage 跟进"
+        >
+          <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">Sage 在等你汇报</p>
+          <p className="mt-2 text-sm leading-relaxed text-amber-900/95 dark:text-amber-100/90">
+            {pendingFollowUp}
           </p>
           <Button asChild className="mt-4 rounded-xl" size="sm" variant="secondary">
             <Link to="/app/review">去复盘 →</Link>
           </Button>
         </section>
       ) : null}
+
+      {/* 每日一问：暂时关闭（题目质量优化后再开）。保留实现于 components/daily-question-card.tsx + lib/daily-question.ts
+      {user?.id ? (
+        <DailyQuestionCard userId={user.id} questionDate={localYmd()} enabled={showDailyQuestion} />
+      ) : null}
+      */}
 
       <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
         <h2 className="text-sm font-semibold tracking-tight">今日任务</h2>
@@ -434,8 +522,10 @@ function Today() {
           <p className="mt-4 text-sm text-destructive">
             任务加载失败。若刚部署数据库，请先执行迁移（含 task_completions 表）。
           </p>
-        ) : tasksLoading ? (
+        ) : tasksLoading && !loadDeadlinePassed ? (
           <p className="mt-4 text-sm text-muted-foreground">加载任务…</p>
+        ) : tasksLoading && loadDeadlinePassed ? (
+          <p className="mt-4 text-sm text-muted-foreground">任务加载较慢，请稍后再试或刷新页面。</p>
         ) : tasks.length === 0 ? (
           <div className="mt-4 rounded-2xl border border-dashed border-border bg-muted/30 p-5 text-center">
             <p className="text-sm text-foreground">
@@ -484,8 +574,10 @@ function Today() {
 
         {archiveError ? (
           <p className="mt-4 text-sm text-destructive">卡点档案加载失败。</p>
-        ) : archiveLoading ? (
+        ) : archiveLoading && !loadDeadlinePassed ? (
           <p className="mt-4 text-sm text-muted-foreground">加载档案…</p>
+        ) : archiveLoading && loadDeadlinePassed ? (
+          <p className="mt-4 text-sm text-muted-foreground">档案加载较慢，请稍后再试或刷新页面。</p>
         ) : archiveRows.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
             还没有卡点记录。完成第一次复盘后，你的档案会出现在这里。
@@ -546,15 +638,42 @@ function Today() {
           </ul>
         )}
       </section>
+
+      {user?.id ? (
+        <ExamScheduleDialog open={examScheduleOpen} onOpenChange={setExamScheduleOpen} userId={user.id} />
+      ) : null}
     </div>
   );
 }
 
-function GaokaoCountdownCard({ days, urgent }: { days: number; urgent: boolean }) {
+function ExamCountdownCard({
+  examName,
+  days,
+  urgent,
+  onOpenSchedule,
+}: {
+  examName: string;
+  days: number | null;
+  urgent: boolean;
+  onOpenSchedule: () => void;
+}) {
+  const line =
+    days === null
+      ? "添加考试日程"
+      : days < 0
+        ? `${examName} 已过 ${-days} 天`
+        : `距${examName} ${days} 天`;
+  const sub =
+    days === null
+      ? "点击设置考试名称与日期"
+      : "以最近一场为准 · 可管理多场考试";
+
   return (
-    <div
+    <button
+      type="button"
+      onClick={onOpenSchedule}
       className={cn(
-        "rounded-2xl border border-border bg-card p-4 text-left outline-none transition",
+        "w-full rounded-2xl border border-border bg-card p-4 text-left outline-none transition hover:border-ring/50 focus-visible:ring-2 focus-visible:ring-ring",
         urgent && "border-amber-500/55 bg-amber-500/[0.08] shadow-[0_0_0_1px_rgba(245,158,11,0.12)]",
       )}
     >
@@ -562,11 +681,180 @@ function GaokaoCountdownCard({ days, urgent }: { days: number; urgent: boolean }
         <Clock className="h-3.5 w-3.5" />
         倒计时
       </div>
-      <div className="mt-1 text-lg font-semibold leading-snug tabular-nums">
-        距高考 {days} 天
-      </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">每年 6 月 7 日 · 自动计算</p>
-    </div>
+      <div className="mt-1 text-lg font-semibold leading-snug tabular-nums">{line}</div>
+      <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
+    </button>
+  );
+}
+
+function ExamScheduleDialog({
+  open,
+  onOpenChange,
+  userId,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  userId: string;
+}) {
+  const qc = useQueryClient();
+  const { data: rows = [] } = useQuery({
+    queryKey: ["user-exams", userId],
+    queryFn: () => fetchUserExams(userId),
+    enabled: open && !!userId,
+  });
+  const [formName, setFormName] = useState("");
+  const [formDate, setFormDate] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setFormName("");
+      setFormDate("");
+      setEditingId(null);
+    }
+  }, [open]);
+
+  const invalidateExamData = () => {
+    void qc.invalidateQueries({ queryKey: ["user-exams", userId] });
+    void qc.invalidateQueries({ queryKey: ["today-tasks", userId] });
+  };
+
+  const saveForm = async () => {
+    const n = formName.trim();
+    if (!n || !formDate) {
+      toast.error("请填写考试名称和日期");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (editingId) {
+        const { error } = await supabase
+          .from("user_exams")
+          .update({ name: n, exam_date: formDate })
+          .eq("id", editingId)
+          .eq("user_id", userId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("user_exams").insert({
+          user_id: userId,
+          name: n,
+          exam_date: formDate,
+        });
+        if (error) throw error;
+      }
+      await syncProfileNearestExam(userId);
+      invalidateExamData();
+      setFormName("");
+      setFormDate("");
+      setEditingId(null);
+      toast.success(editingId ? "已更新" : "已添加");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeExam = async (id: string) => {
+    setBusy(true);
+    try {
+      const { error } = await supabase.from("user_exams").delete().eq("id", id).eq("user_id", userId);
+      if (error) throw error;
+      await syncProfileNearestExam(userId);
+      invalidateExamData();
+      if (editingId === id) {
+        setEditingId(null);
+        setFormName("");
+        setFormDate("");
+      }
+      toast.success("已删除");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startEdit = (r: UserExamRow) => {
+    setEditingId(r.id);
+    setFormName(r.name);
+    setFormDate(r.exam_date.slice(0, 10));
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>考试与倒计时</DialogTitle>
+          <DialogDescription>管理多场考试；Today 页倒计时显示最近一场。</DialogDescription>
+        </DialogHeader>
+
+        <ul className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-border bg-muted/30 p-2 text-sm">
+          {rows.length === 0 ? (
+            <li className="px-2 py-3 text-muted-foreground">暂无记录，请在下方添加。</li>
+          ) : (
+            rows.map((r) => (
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-transparent bg-card px-2 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground">{r.name}</p>
+                  <p className="text-xs tabular-nums text-muted-foreground">{r.exam_date.slice(0, 10)}</p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg px-2 text-xs" disabled={busy} onClick={() => startEdit(r)}>
+                    编辑
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 rounded-lg px-2 text-xs text-destructive"
+                    disabled={busy}
+                    onClick={() => void removeExam(r.id)}
+                  >
+                    删除
+                  </Button>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
+
+        <div className="space-y-3 border-t border-border pt-4">
+          <p className="text-sm font-medium">{editingId ? "编辑考试" : "添加考试"}</p>
+          <Input
+            value={formName}
+            onChange={(e) => setFormName(e.target.value)}
+            placeholder="考试名称"
+            className="rounded-xl"
+          />
+          <Input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="rounded-xl" />
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" className="rounded-xl" disabled={busy} onClick={() => void saveForm()}>
+              {editingId ? "保存修改" : "添加"}
+            </Button>
+            {editingId ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="rounded-xl"
+                disabled={busy}
+                onClick={() => {
+                  setEditingId(null);
+                  setFormName("");
+                  setFormDate("");
+                }}
+              >
+                取消编辑
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

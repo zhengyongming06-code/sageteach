@@ -1,5 +1,4 @@
 import { cn } from "@/lib/utils";
-import { subjectAccentCardClass } from "@/lib/subject-accent";
 
 export type ReviewSummaryCardProps = {
   variant: "full" | "fallback";
@@ -24,7 +23,8 @@ export function ReviewSummaryCard({
     return (
       <div
         className={cn(
-          "rounded-2xl border border-border border-l-4 border-l-muted-foreground bg-muted/50 px-4 py-3 text-sm text-foreground shadow-sm",
+          "rounded-2xl border border-neutral-200 bg-[#FFFFFF] px-4 py-3 text-sm text-foreground shadow-sm",
+          "dark:border-border dark:bg-card",
           className,
         )}
       >
@@ -33,13 +33,11 @@ export function ReviewSummaryCard({
     );
   }
 
-  const accent = subject ? subjectAccentCardClass(subject) : "border-l-4 border-l-primary bg-primary/[0.06]";
-
   return (
     <div
       className={cn(
-        "rounded-2xl border border-border px-4 py-3 text-sm shadow-sm",
-        accent,
+        "rounded-2xl border border-neutral-200 bg-[#FFFFFF] px-4 py-3 text-sm text-foreground shadow-sm",
+        "dark:border-border dark:bg-card",
         className,
       )}
     >

@@ -77,6 +77,45 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_questions: {
+        Row: {
+          answer: string | null
+          completed: boolean
+          created_at: string
+          date: string
+          explanation: string | null
+          id: string
+          question: string | null
+          subject: string | null
+          user_id: string
+          was_correct: boolean | null
+        }
+        Insert: {
+          answer?: string | null
+          completed?: boolean
+          created_at?: string
+          date: string
+          explanation?: string | null
+          id?: string
+          question?: string | null
+          subject?: string | null
+          user_id: string
+          was_correct?: boolean | null
+        }
+        Update: {
+          answer?: string | null
+          completed?: boolean
+          created_at?: string
+          date?: string
+          explanation?: string | null
+          id?: string
+          question?: string | null
+          subject?: string | null
+          user_id?: string
+          was_correct?: boolean | null
+        }
+        Relationships: []
+      }
       daily_plans: {
         Row: {
           created_at: string
@@ -107,6 +146,7 @@ export type Database = {
           current_score: number | null
           display_name: string | null
           exam_date: string | null
+          exam_name: string | null
           grade: string | null
           id: string
           onboarded: boolean
@@ -119,6 +159,7 @@ export type Database = {
           current_score?: number | null
           display_name?: string | null
           exam_date?: string | null
+          exam_name?: string | null
           grade?: string | null
           id: string
           onboarded?: boolean
@@ -131,6 +172,7 @@ export type Database = {
           current_score?: number | null
           display_name?: string | null
           exam_date?: string | null
+          exam_name?: string | null
           grade?: string | null
           id?: string
           onboarded?: boolean
@@ -173,6 +215,33 @@ export type Database = {
           tonight_task?: string
           user_id?: string
           weak_point?: string
+        }
+        Relationships: []
+      }
+      review_session_feedback: {
+        Row: {
+          created_at: string
+          id: string
+          rating: string
+          session_date: string
+          subject: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          rating: string
+          session_date: string
+          subject: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          rating?: string
+          session_date?: string
+          subject?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -244,6 +313,30 @@ export type Database = {
           id?: string
           review_summary_id?: string
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_exams: {
+        Row: {
+          created_at: string
+          exam_date: string
+          id: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          exam_date: string
+          id?: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          exam_date?: string
+          id?: string
+          name?: string
           user_id?: string
         }
         Relationships: []
