@@ -110,6 +110,7 @@ export type Database = {
           grade: string | null
           id: string
           onboarded: boolean
+          review_onboarding_complete: boolean
           target_score: number | null
           updated_at: string
         }
@@ -121,6 +122,7 @@ export type Database = {
           grade?: string | null
           id: string
           onboarded?: boolean
+          review_onboarding_complete?: boolean
           target_score?: number | null
           updated_at?: string
         }
@@ -132,6 +134,7 @@ export type Database = {
           grade?: string | null
           id?: string
           onboarded?: boolean
+          review_onboarding_complete?: boolean
           target_score?: number | null
           updated_at?: string
         }
@@ -142,6 +145,7 @@ export type Database = {
           created_at: string
           follow_up: string
           id: string
+          mastered: string | null
           session_date: string
           subject: string
           tonight_task: string
@@ -152,6 +156,7 @@ export type Database = {
           created_at?: string
           follow_up: string
           id?: string
+          mastered?: string | null
           session_date?: string
           subject: string
           tonight_task: string
@@ -162,6 +167,7 @@ export type Database = {
           created_at?: string
           follow_up?: string
           id?: string
+          mastered?: string | null
           session_date?: string
           subject?: string
           tonight_task?: string
@@ -214,6 +220,30 @@ export type Database = {
           created_at?: string
           id?: string
           plan?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
+      task_completions: {
+        Row: {
+          completed: boolean
+          id: string
+          review_summary_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed?: boolean
+          id?: string
+          review_summary_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed?: boolean
+          id?: string
+          review_summary_id?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []

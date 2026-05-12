@@ -3,6 +3,7 @@ import { fetchDeepSeekReplyWithTimeout } from "./deepseek";
 export const REVIEW_END_KEYWORDS = [
   "差不多了",
   "结束了",
+  "结束",
   "好了",
   "我去学了",
   "拜",
@@ -14,6 +15,7 @@ export type ReviewSummaryPayload = {
   weak_point: string;
   tonight_task: string;
   follow_up: string;
+  mastered: string | null;
 };
 
 export function userEndsReviewSession(userText: string): boolean {
@@ -34,17 +36,18 @@ export function formatReviewConversationForSummary(
 const SUMMARY_SYSTEM = `You extract structured data from a Chinese tutoring chat. Output ONLY valid JSON, no markdown fences, no other text.`;
 
 export function buildReviewSummaryUserPrompt(conversation: string): string {
-  return `Based on the following conversation between a student and Sage,
-extract a structured summary in this EXACT JSON format:
+  return `Based on this conversation, generate a JSON summary:
 {
-  "subject": "学科名称",
-  "weak_point": "一句话描述今天发现的核心卡点",
-  "tonight_task": "一个具体的、可执行的今晚任务",
-  "follow_up": "下次复盘时Sage要问学生的一个问题"
+  "subject": "学科",
+  "weak_point": "这次发现的核心知识点漏洞，一句话，要具体到知识点名称",
+  "tonight_task": "一个今晚可以完成的具体任务，包含题目数量或时间",
+  "follow_up": "下次复盘时Sage要问的一个具体问题",
+  "mastered": "这次对话里学生做对了或理解了的知识点，没有则返回null"
 }
+Return ONLY valid JSON.
+
 Conversation:
-${conversation}
-Return ONLY valid JSON, no other text.`;
+${conversation}`;
 }
 
 export function parseReviewSummaryJson(raw: string): ReviewSummaryPayload | null {
@@ -60,7 +63,13 @@ export function parseReviewSummaryJson(raw: string): ReviewSummaryPayload | null
     const tonight_task = String(o.tonight_task ?? "").trim();
     const follow_up = String(o.follow_up ?? "").trim();
     if (!subject || !weak_point || !tonight_task || !follow_up) return null;
-    return { subject, weak_point, tonight_task, follow_up };
+    let mastered: string | null = null;
+    const mRaw = o.mastered;
+    if (mRaw != null && mRaw !== "" && String(mRaw).toLowerCase() !== "null") {
+      const ms = String(mRaw).trim();
+      if (ms) mastered = ms;
+    }
+    return { subject, weak_point, tonight_task, follow_up, mastered };
   } catch {
     return null;
   }
