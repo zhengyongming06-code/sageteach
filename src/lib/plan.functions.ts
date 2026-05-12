@@ -19,7 +19,7 @@ export const generateTodayPlan = createServerFn({ method: "POST" })
     const [profileRes, weakRes, reflRes] = await Promise.all([
       supabase
         .from("profiles")
-        .select("grade,current_score,target_score,exam_date")
+        .select("grade,current_score,target_score,exam_date,exam_name")
         .eq("id", userId)
         .maybeSingle(),
       supabase.from("weak_subjects").select("subject").eq("user_id", userId),
@@ -51,7 +51,7 @@ export const generateTodayPlan = createServerFn({ method: "POST" })
 - 优先薄弱学科和最近复盘暴露的问题
 - 只返回 JSON，不要任何额外文字`;
 
-    const usr = `学生：${p?.grade ?? "?"}，当前 ${p?.current_score ?? "?"} → 目标 ${p?.target_score ?? "?"}
+    const usr = `学生：${p?.grade ?? "?"}，当前 ${p?.current_score ?? "?"} → 目标 ${p?.target_score ?? "?"}，最近考试 ${p?.exam_name ?? "?"}（${p?.exam_date ?? "?"})
 薄弱：${weak}
 最近复盘：
 ${recent || "（无）"}`;

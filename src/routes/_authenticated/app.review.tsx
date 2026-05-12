@@ -5,12 +5,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { SUBJECTS, type Subject } from "@/lib/subjects";
 import {
+  FIRST_REVIEW_GUIDED_SESSION_SUFFIX,
   REVIEW_PRACTICE_PROBLEM_SUFFIX,
   SAGE_DEEPSEEK_SYSTEM_PROMPT,
   SAGE_DUAL_MODE_SUFFIX,
   SAGE_RESOURCE_RECOMMENDATIONS_SUFFIX,
+  SAGE_SPRINT_MODE_SUFFIX,
   reviewContextSuffix,
 } from "@/lib/sage-system-prompt";
+import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
 import { fetchDeepSeekReply } from "@/lib/deepseek";
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
@@ -28,8 +31,10 @@ import { coachMessagesHasReviewColumns, MIGRATION_HINT } from "@/lib/coach-messa
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
 import {
+  ONBOARDING_REVIEW_SUBJECT,
+  POST_FIRST_ONBOARDING_SESSION_CLOSING,
   POST_REVIEW_SESSION_CLOSING,
-  REVIEW_ONBOARDING_FIRST_OPENING,
+  REVIEW_GUIDED_FIRST_OPENING,
   REVIEW_RETURNING_FIRST_OPENING,
 } from "@/lib/review-opening";
 import { assistantSignalsCorrectness } from "@/lib/review-positive-feedback";
@@ -57,6 +62,8 @@ function formatDateLabel(ymd: string) {
 type SessionRow = { session_date: string; subject: string };
 type SidebarSessionFilter = "全部" | Subject;
 
+const SPRINT_EXAM_MAX_DAYS = 30;
+
 type SessionCardState =
   | null
   | {
@@ -76,7 +83,7 @@ function sessionKey(subject: string, date: string) {
 function Review() {
   const { user } = useAuth();
   const qc = useQueryClient();
-  const [subject, setSubject] = useState<Subject>(SUBJECTS[0]);
+  const [subject, setSubject] = useState<string>(SUBJECTS[0]);
   const [selectedDate, setSelectedDate] = useState(() => localYmd());
   const [sidebarSessionFilter, setSidebarSessionFilter] = useState<SidebarSessionFilter>("全部");
   const [draft, setDraft] = useState("");
@@ -88,23 +95,6 @@ function Review() {
   const selectedDateRef = useRef(selectedDate);
   subjectRef.current = subject;
   selectedDateRef.current = selectedDate;
-
-  useEffect(() => {
-    setSelectedDate(localYmd());
-  }, [subject]);
-
-  useEffect(() => {
-    setSessionCard(null);
-  }, [subject, selectedDate]);
-
-  const { data: hasReviewCols } = useQuery({
-    queryKey: ["coach-review-schema"],
-    enabled: !!user?.id,
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    queryFn: () => coachMessagesHasReviewColumns(supabase),
-  });
 
   const {
     data: profileFlags,
@@ -125,6 +115,49 @@ function Review() {
   });
 
   const profileGateReady = profileFlagsReady || profileFlagsIsError;
+
+  const onboardingIncomplete =
+    profileGateReady && !profileFlagsIsError && profileFlags?.review_onboarding_complete !== true;
+  const { data: examRows = [] } = useQuery({
+    queryKey: ["user-exams", user?.id],
+    enabled: !!user?.id,
+    queryFn: () => fetchUserExams(user!.id),
+    staleTime: 60_000,
+  });
+
+  const nearestExam = useMemo(() => pickNearestExam(examRows), [examRows]);
+  const sprintMode =
+    nearestExam !== null &&
+    nearestExam.days >= 0 &&
+    nearestExam.days <= SPRINT_EXAM_MAX_DAYS;
+
+  const chatSubject = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subject;
+
+  useEffect(() => {
+    if (!profileGateReady || profileFlagsIsError) return;
+    if (profileFlags?.review_onboarding_complete !== true) {
+      setSubject(ONBOARDING_REVIEW_SUBJECT);
+      setSelectedDate(localYmd());
+    }
+  }, [profileGateReady, profileFlagsIsError, profileFlags?.review_onboarding_complete]);
+
+  useEffect(() => {
+    if (onboardingIncomplete) return;
+    setSelectedDate(localYmd());
+  }, [subject, onboardingIncomplete]);
+
+  useEffect(() => {
+    setSessionCard(null);
+  }, [subject, selectedDate]);
+
+  const { data: hasReviewCols } = useQuery({
+    queryKey: ["coach-review-schema"],
+    enabled: !!user?.id,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    queryFn: () => coachMessagesHasReviewColumns(supabase),
+  });
 
   const { data: hasAnyReviewMessages } = useQuery({
     queryKey: ["review-prior-any", user?.id],
@@ -164,12 +197,9 @@ function Review() {
         return;
       }
 
-      const sub = subjectRef.current;
+      const sub = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subjectRef.current;
       const dt = selectedDateRef.current;
-      const opening =
-        profileFlags?.review_onboarding_complete === true
-          ? REVIEW_RETURNING_FIRST_OPENING
-          : REVIEW_ONBOARDING_FIRST_OPENING;
+      const opening = onboardingIncomplete ? REVIEW_GUIDED_FIRST_OPENING : REVIEW_RETURNING_FIRST_OPENING;
       const { error } = await supabase.from("coach_messages").insert({
         user_id: uid,
         role: "assistant",
@@ -192,7 +222,7 @@ function Review() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, hasReviewCols, hasAnyReviewMessages, profileGateReady, profileFlags?.review_onboarding_complete, qc]);
+  }, [user?.id, hasReviewCols, hasAnyReviewMessages, profileGateReady, onboardingIncomplete, qc]);
 
   const { data: sessionIndex = [] } = useQuery({
     queryKey: ["review-sessions-index", user?.id],
@@ -227,19 +257,19 @@ function Review() {
   }, [sessionIndex, sidebarSessionFilter]);
 
   const hasSessionForSelectedDate = useMemo(
-    () => sessionIndex.some((s) => s.session_date === selectedDate && s.subject === subject),
-    [sessionIndex, selectedDate, subject],
+    () => sessionIndex.some((s) => s.session_date === selectedDate && s.subject === chatSubject),
+    [sessionIndex, selectedDate, chatSubject],
   );
 
   const { data: messageRows = [] } = useQuery({
-    queryKey: ["review-messages", user?.id, subject, selectedDate],
-    enabled: !!user?.id && hasReviewCols === true,
+    queryKey: ["review-messages", user?.id, chatSubject, selectedDate],
+    enabled: !!user?.id && hasReviewCols === true && profileGateReady,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("coach_messages")
         .select("id,role,content,created_at")
         .eq("user_id", user!.id)
-        .eq("review_subject", subject)
+        .eq("review_subject", chatSubject)
         .eq("review_session_date", selectedDate)
         .in("role", ["user", "assistant"])
         .order("created_at", { ascending: true });
@@ -274,7 +304,7 @@ function Review() {
   const runSilentSummary = useCallback(
     async (historyRows: { role: string; content: string }[]) => {
       if (!user?.id) return;
-      const key = sessionKey(subject, selectedDate);
+      const key = sessionKey(chatSubject, selectedDate);
       if (summaryDoneKeysRef.current.has(key)) return;
 
       const transcript = formatReviewConversationForSummary(historyRows);
@@ -282,10 +312,17 @@ function Review() {
 
       summaryDoneKeysRef.current.add(key);
 
+      const wasGuidedFirst = onboardingIncomplete;
+
       try {
+        console.log("[review-summary] runSilentSummary", {
+          key,
+          messageCount: historyRows.length,
+          transcriptChars: transcript.length,
+        });
         const parsed = await requestReviewSummaryStructured(transcript);
         if (!parsed) throw new Error("parse");
-        const subjectLabel = parsed.subject.trim() || subject;
+        const subjectLabel = parsed.subject.trim() || chatSubject;
         const row = {
           user_id: user.id,
           session_date: selectedDate,
@@ -313,11 +350,13 @@ function Review() {
           .eq("id", user.id);
         if (profileErr) console.error(profileErr);
 
+        const closingContent = wasGuidedFirst ? POST_FIRST_ONBOARDING_SESSION_CLOSING : POST_REVIEW_SESSION_CLOSING;
+
         const { error: closingErr } = await supabase.from("coach_messages").insert({
           user_id: user.id,
           role: "assistant",
-          content: POST_REVIEW_SESSION_CLOSING,
-          review_subject: subject,
+          content: closingContent,
+          review_subject: chatSubject,
           review_session_date: selectedDate,
         });
         if (closingErr) console.error(closingErr);
@@ -329,17 +368,22 @@ function Review() {
           qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] }),
           qc.invalidateQueries({ queryKey: ["today-sage-hook", user.id] }),
           qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] }),
-          qc.invalidateQueries({ queryKey: ["review-messages", user.id, subject, selectedDate] }),
+          qc.invalidateQueries({ queryKey: ["review-messages", user.id, chatSubject, selectedDate] }),
           qc.invalidateQueries({ queryKey: ["profile-flags", user.id] }),
           qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
         ]);
         window.dispatchEvent(new CustomEvent("sage-weak-archive-refresh"));
-      } catch {
+      } catch (e) {
         summaryDoneKeysRef.current.delete(key);
+        console.error("[review-summary] runSilentSummary failed", {
+          key,
+          transcriptChars: transcript.length,
+          error: e,
+        });
         setSessionCard({ kind: "fallback" });
       }
     },
-    [subject, selectedDate, user, qc],
+    [chatSubject, selectedDate, user, qc, onboardingIncomplete],
   );
 
   const send = useCallback(async () => {
@@ -361,19 +405,19 @@ function Review() {
         user_id: user.id,
         role: "user",
         content: text,
-        review_subject: subject,
+        review_subject: chatSubject,
         review_session_date: selectedDate,
       });
       if (uErr) throw uErr;
 
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subject, selectedDate] });
+      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, chatSubject, selectedDate] });
 
       const { data: historyAfterUser, error: h0Err } = await supabase
         .from("coach_messages")
         .select("role,content")
         .eq("user_id", user.id)
-        .eq("review_subject", subject)
+        .eq("review_subject", chatSubject)
         .eq("review_session_date", selectedDate)
         .in("role", ["user", "assistant"])
         .order("created_at", { ascending: true });
@@ -382,12 +426,14 @@ function Review() {
       const userCountAfter = (historyAfterUser ?? []).filter((m) => m.role === "user").length;
       const shouldSummarizeAfterTurn = keywordEnd || userCountAfter >= 8;
 
-      const sys =
+      let sys =
         SAGE_DEEPSEEK_SYSTEM_PROMPT +
         SAGE_DUAL_MODE_SUFFIX +
         REVIEW_PRACTICE_PROBLEM_SUFFIX +
         SAGE_RESOURCE_RECOMMENDATIONS_SUFFIX +
-        reviewContextSuffix(subject, selectedDate);
+        reviewContextSuffix(chatSubject, selectedDate);
+      if (onboardingIncomplete) sys += FIRST_REVIEW_GUIDED_SESSION_SUFFIX;
+      if (sprintMode) sys += SAGE_SPRINT_MODE_SUFFIX;
       const apiMessages = [
         { role: "system" as const, content: sys },
         ...(historyAfterUser ?? []).map((m) => ({
@@ -402,7 +448,7 @@ function Review() {
         user_id: user.id,
         role: "assistant",
         content: reply,
-        review_subject: subject,
+        review_subject: chatSubject,
         review_session_date: selectedDate,
       });
       if (aErr) throw aErr;
@@ -414,13 +460,13 @@ function Review() {
       }
 
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subject, selectedDate] });
+      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, chatSubject, selectedDate] });
 
       const { data: fullHistory, error: h1Err } = await supabase
         .from("coach_messages")
         .select("role,content")
         .eq("user_id", user.id)
-        .eq("review_subject", subject)
+        .eq("review_subject", chatSubject)
         .eq("review_session_date", selectedDate)
         .in("role", ["user", "assistant"])
         .order("created_at", { ascending: true });
@@ -435,7 +481,7 @@ function Review() {
     } finally {
       setIsSending(false);
     }
-  }, [draft, user?.id, isSending, subject, selectedDate, qc, runSilentSummary]);
+  }, [draft, user?.id, isSending, chatSubject, selectedDate, qc, runSilentSummary, onboardingIncomplete, sprintMode]);
 
   const onEndReviewClick = useCallback(() => {
     if (userMessageCount < 3) return;
@@ -453,11 +499,56 @@ function Review() {
     />
   ) : null;
 
-  const showOnboardingBanner = profileFlagsReady && profileFlags?.review_onboarding_complete !== true;
-
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname === "/app/review/archive") {
     return <Outlet />;
+  }
+
+  if (onboardingIncomplete) {
+    return (
+      <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-4 pb-2 md:min-h-[calc(100dvh-7rem)]">
+        {hasReviewCols === false && (
+          <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>需要数据库迁移</AlertTitle>
+            <AlertDescription className="text-sm">{MIGRATION_HINT}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="rounded-2xl border border-amber-200/80 bg-amber-50/95 px-4 py-3 text-center shadow-sm dark:border-amber-800/60 dark:bg-amber-950/40">
+          <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">第一次复盘 · 大约5分钟</p>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col">
+          <SageChatPanel
+            expand
+            messages={messages}
+            draft={draft}
+            onDraftChange={setDraft}
+            onSubmit={() => void send()}
+            isSending={isSending}
+            emptyTitle="从这里开始"
+            emptyHint="先看 Sage 的第一条消息，然后随便用你自己的话说说就好。"
+            placeholder={hasReviewCols === false ? "请先完成上方数据库迁移" : "说说你的感觉…"}
+            className="min-h-0 flex-1"
+            betweenScrollAndInput={
+              hasReviewCols === true && userMessageCount >= 3 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full rounded-xl border-dashed"
+                  onClick={onEndReviewClick}
+                >
+                  结束复盘
+                </Button>
+              ) : null
+            }
+            belowForm={summaryBelow}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -485,17 +576,6 @@ function Review() {
         </Alert>
       )}
 
-      {hasReviewCols === true && showOnboardingBanner && (
-        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/[0.08] px-4 py-3 text-sm text-foreground shadow-sm">
-          <p className="font-medium text-sky-950 dark:text-sky-50">
-            欢迎来到 Sage。我们先做一件事：找到你今天最卡的那道题。
-          </p>
-          <p className="mt-1 text-sky-900/90 dark:text-sky-100/90">
-            选一科，告诉我你今天遇到了什么问题。
-          </p>
-        </div>
-      )}
-
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <aside className="lg:w-56 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -520,15 +600,13 @@ function Review() {
           </div>
           <ul className="max-h-40 space-y-1 overflow-y-auto lg:max-h-[min(380px,50vh)]">
             {filteredSessionRows.map((s) => {
-              const rowActive = selectedDate === s.session_date && subject === s.subject;
+              const rowActive = selectedDate === s.session_date && chatSubject === s.subject;
               return (
                 <li key={`${s.session_date}-${s.subject}`}>
                   <button
                     type="button"
                     onClick={() => {
-                      if (SUBJECTS.includes(s.subject as Subject)) {
-                        setSubject(s.subject as Subject);
-                      }
+                      setSubject(s.subject);
                       setSelectedDate(s.session_date);
                     }}
                     className={cn(
@@ -627,7 +705,7 @@ function Review() {
               emptyTitle="从这里开始复盘"
               emptyHint="说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
               placeholder={
-                hasReviewCols === false ? "请先完成上方数据库迁移" : `聊聊今天的「${subject}」…`
+                hasReviewCols === false ? "请先完成上方数据库迁移" : `聊聊今天的「${chatSubject}」…`
               }
               className="min-h-[320px] md:min-h-[420px]"
               betweenScrollAndInput={
