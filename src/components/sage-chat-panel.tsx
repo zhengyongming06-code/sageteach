@@ -46,8 +46,12 @@ export function SageChatPanel({
   const empty = messages.length === 0 && !isSending;
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, isSending]);
+    const el = scrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+  }, [messages, isSending]);
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
