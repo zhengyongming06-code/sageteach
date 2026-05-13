@@ -1,1 +1,6 @@
 project_id = "oxmrryffurwjytpwscqv"
+
+# Local GoTrue: align access-token lifetime with a 7-day stay-signed-in goal.
+# Hosted projects: set the same under Dashboard → Authentication → JWT expiry (seconds).
+[auth]
+jwt_expiry = 604800

@@ -14,7 +14,7 @@ import {
   reviewContextSuffix,
 } from "@/lib/sage-system-prompt";
 import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
-import { fetchDeepSeekReply } from "@/lib/deepseek";
+import { fetchDeepSeekReplyStreaming } from "@/lib/deepseek";
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
@@ -43,6 +43,11 @@ import {
   requestReviewSummaryStructured,
   userEndsReviewSession,
 } from "@/lib/review-summary";
+
+/** Invisible thread anchor: listed in session index, excluded from chat (role system). */
+const REVIEW_SESSION_ANCHOR = "__review_session_anchor_v1__";
+
+type CoachMessageRow = { id: string; role: string; content: string; created_at: string };
 
 export const Route = createFileRoute("/_authenticated/app/review")({ component: Review });
 
@@ -88,6 +93,7 @@ function Review() {
   const [sidebarSessionFilter, setSidebarSessionFilter] = useState<SidebarSessionFilter>("全部");
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [streamAssistantText, setStreamAssistantText] = useState<string | null>(null);
   const [sessionCard, setSessionCard] = useState<SessionCardState>(null);
   const summaryDoneKeysRef = useRef(new Set<string>());
   const openingFlightRef = useRef(false);
@@ -99,29 +105,43 @@ function Review() {
   const {
     data: profileFlags,
     isSuccess: profileFlagsReady,
-    isError: profileFlagsIsError,
   } = useQuery({
     queryKey: ["profile-flags", user?.id],
     enabled: !!user?.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("review_onboarding_complete")
-        .eq("id", user!.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data as { review_onboarding_complete: boolean } | null;
+    retry: false,
+    queryFn: async (): Promise<{
+      needsGuidedReviewOnboarding: boolean;
+    }> => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("review_onboarding_complete")
+          .eq("id", user!.id)
+          .maybeSingle();
+        if (error) {
+          console.warn("[profiles] review_onboarding flags skipped", error);
+          return { needsGuidedReviewOnboarding: false };
+        }
+        return { needsGuidedReviewOnboarding: data?.review_onboarding_complete === false };
+      } catch (e) {
+        console.warn("[profiles] review_onboarding flags skipped", e);
+        return { needsGuidedReviewOnboarding: false };
+      }
     },
   });
 
-  const profileGateReady = profileFlagsReady || profileFlagsIsError;
-
-  const onboardingIncomplete =
-    profileGateReady && !profileFlagsIsError && profileFlags?.review_onboarding_complete !== true;
+  const onboardingIncomplete = profileFlagsReady && profileFlags?.needsGuidedReviewOnboarding === true;
   const { data: examRows = [] } = useQuery({
     queryKey: ["user-exams", user?.id],
     enabled: !!user?.id,
-    queryFn: () => fetchUserExams(user!.id),
+    queryFn: async () => {
+      try {
+        return await fetchUserExams(user!.id);
+      } catch (e) {
+        console.warn("[user-exams] query skipped", e);
+        return [];
+      }
+    },
     staleTime: 60_000,
   });
 
@@ -134,12 +154,12 @@ function Review() {
   const chatSubject = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subject;
 
   useEffect(() => {
-    if (!profileGateReady || profileFlagsIsError) return;
-    if (profileFlags?.review_onboarding_complete !== true) {
+    if (!profileFlagsReady) return;
+    if (profileFlags?.needsGuidedReviewOnboarding === true) {
       setSubject(ONBOARDING_REVIEW_SUBJECT);
       setSelectedDate(localYmd());
     }
-  }, [profileGateReady, profileFlagsIsError, profileFlags?.review_onboarding_complete]);
+  }, [profileFlagsReady, profileFlags?.needsGuidedReviewOnboarding]);
 
   useEffect(() => {
     if (onboardingIncomplete) return;
@@ -174,7 +194,7 @@ function Review() {
   });
 
   useEffect(() => {
-    if (!user?.id || hasReviewCols !== true || hasAnyReviewMessages !== false || !profileGateReady)
+    if (!user?.id || hasReviewCols !== true || hasAnyReviewMessages !== false || !profileFlagsReady)
       return;
     if (openingFlightRef.current) return;
     openingFlightRef.current = true;
@@ -222,32 +242,40 @@ function Review() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, hasReviewCols, hasAnyReviewMessages, profileGateReady, onboardingIncomplete, qc]);
+  }, [user?.id, hasReviewCols, hasAnyReviewMessages, profileFlagsReady, onboardingIncomplete, qc]);
 
   const { data: sessionIndex = [] } = useQuery({
     queryKey: ["review-sessions-index", user?.id],
-    enabled: !!user?.id && hasReviewCols === true,
+    enabled: !!user?.id,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("coach_messages")
-        .select("review_session_date,review_subject")
-        .eq("user_id", user!.id)
-        .not("review_session_date", "is", null)
-        .not("review_subject", "is", null)
-        .order("review_session_date", { ascending: false });
-      if (error) throw error;
-      const seen = new Set<string>();
-      const list: SessionRow[] = [];
-      for (const row of data ?? []) {
-        const d = row.review_session_date;
-        const subj = row.review_subject;
-        if (!d || !subj) continue;
-        const k = `${d}::${subj}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        list.push({ session_date: d, subject: subj });
+      try {
+        const { data, error } = await supabase
+          .from("coach_messages")
+          .select("review_session_date,review_subject")
+          .eq("user_id", user!.id)
+          .not("review_session_date", "is", null)
+          .not("review_subject", "is", null)
+          .order("review_session_date", { ascending: false });
+        if (error) {
+          console.warn("[review-sessions-index]", error);
+          return [];
+        }
+        const seen = new Set<string>();
+        const list: SessionRow[] = [];
+        for (const row of data ?? []) {
+          const d = row.review_session_date;
+          const subj = row.review_subject;
+          if (!d || !subj) continue;
+          const k = `${d}::${subj}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          list.push({ session_date: d, subject: subj });
+        }
+        return list;
+      } catch (e) {
+        console.warn("[review-sessions-index]", e);
+        return [];
       }
-      return list;
     },
   });
 
@@ -261,22 +289,61 @@ function Review() {
     [sessionIndex, selectedDate, chatSubject],
   );
 
-  const { data: messageRows = [] } = useQuery({
+  const messagesCacheRef = useRef(new Map<string, CoachMessageRow[]>());
+  const activeSessionKey = sessionKey(chatSubject, selectedDate);
+
+  const [msgSkeletonDeadline, setMsgSkeletonDeadline] = useState(false);
+  useEffect(() => {
+    setMsgSkeletonDeadline(false);
+    const t = setTimeout(() => setMsgSkeletonDeadline(true), 2000);
+    return () => clearTimeout(t);
+  }, [activeSessionKey]);
+
+  const {
+    data: messageRowsRaw,
+    isPending: messagesPending,
+    isFetching: messagesFetching,
+    isFetched: messagesFetched,
+  } = useQuery({
     queryKey: ["review-messages", user?.id, chatSubject, selectedDate],
-    enabled: !!user?.id && hasReviewCols === true && profileGateReady,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("coach_messages")
-        .select("id,role,content,created_at")
-        .eq("user_id", user!.id)
-        .eq("review_subject", chatSubject)
-        .eq("review_session_date", selectedDate)
-        .in("role", ["user", "assistant"])
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return data ?? [];
+    enabled: !!user?.id,
+    queryFn: async (): Promise<CoachMessageRow[]> => {
+      const key = sessionKey(chatSubject, selectedDate);
+      try {
+        const { data, error } = await supabase
+          .from("coach_messages")
+          .select("id,role,content,created_at")
+          .eq("user_id", user!.id)
+          .eq("review_subject", chatSubject)
+          .eq("review_session_date", selectedDate)
+          .in("role", ["user", "assistant"])
+          .order("created_at", { ascending: true });
+        if (error) {
+          console.warn("[review-messages]", error);
+          return messagesCacheRef.current.get(key) ?? [];
+        }
+        return (data ?? []) as CoachMessageRow[];
+      } catch (e) {
+        console.warn("[review-messages]", e);
+        return messagesCacheRef.current.get(key) ?? [];
+      }
     },
   });
+
+  const messageRows =
+    messageRowsRaw ?? messagesCacheRef.current.get(activeSessionKey) ?? [];
+
+  useEffect(() => {
+    if (!messagesFetched || messagesFetching) return;
+    if (messageRowsRaw !== undefined) {
+      messagesCacheRef.current.set(activeSessionKey, messageRowsRaw);
+    }
+  }, [messagesFetched, messagesFetching, messageRowsRaw, activeSessionKey]);
+
+  const showHistorySkeleton =
+    !msgSkeletonDeadline &&
+    (messagesPending || messagesFetching) &&
+    messageRows.length === 0;
 
   const messages: SageChatMessage[] = useMemo(
     () =>
@@ -397,6 +464,8 @@ function Review() {
       const extended = await coachMessagesHasReviewColumns(supabase);
       if (!extended) {
         toast.error(MIGRATION_HINT);
+        setStreamAssistantText(null);
+        setIsSending(false);
         return;
       }
       const keywordEnd = userEndsReviewSession(text);
@@ -442,7 +511,15 @@ function Review() {
         })),
       ];
 
-      const reply = await fetchDeepSeekReply(apiMessages);
+      setStreamAssistantText("");
+      let reply: string;
+      try {
+        reply = await fetchDeepSeekReplyStreaming(apiMessages, (t) => setStreamAssistantText(t));
+      } catch (streamErr) {
+        setStreamAssistantText(null);
+        throw streamErr;
+      }
+      setStreamAssistantText(null);
 
       const { error: aErr } = await supabase.from("coach_messages").insert({
         user_id: user.id,
@@ -479,6 +556,7 @@ function Review() {
       const msg = e instanceof Error ? e.message : "发送失败";
       toast.error(msg);
     } finally {
+      setStreamAssistantText(null);
       setIsSending(false);
     }
   }, [draft, user?.id, isSending, chatSubject, selectedDate, qc, runSilentSummary, onboardingIncomplete, sprintMode]);
@@ -487,6 +565,47 @@ function Review() {
     if (userMessageCount < 3) return;
     void runSilentSummary(messageRows.map((m) => ({ role: m.role, content: m.content })));
   }, [userMessageCount, messageRows, runSilentSummary]);
+
+  const startTodaySession = useCallback(async () => {
+    const today = localYmd();
+    setSelectedDate(today);
+    if (!user?.id) return;
+    try {
+      const extended = await coachMessagesHasReviewColumns(supabase);
+      if (!extended) {
+        toast.error(MIGRATION_HINT);
+        return;
+      }
+      const subj = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subject;
+      const { count, error: cErr } = await supabase
+        .from("coach_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("review_subject", subj)
+        .eq("review_session_date", today)
+        .in("role", ["user", "assistant"]);
+      if (cErr) console.warn("[startTodaySession] count", cErr);
+      if ((count ?? 0) > 0) {
+        await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
+        await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subj, today] });
+        return;
+      }
+
+      const { error: iErr } = await supabase.from("coach_messages").insert({
+        user_id: user.id,
+        role: "system",
+        content: REVIEW_SESSION_ANCHOR,
+        review_subject: subj,
+        review_session_date: today,
+      });
+      if (iErr) console.warn("[startTodaySession] insert", iErr);
+
+      await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
+      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subj, today] });
+    } catch (e) {
+      console.warn("[startTodaySession]", e);
+    }
+  }, [user?.id, qc, onboardingIncomplete, subject]);
 
   const summaryBelow = sessionCard ? (
     <ReviewSummaryCard
@@ -531,6 +650,8 @@ function Review() {
             emptyHint="先看 Sage 的第一条消息，然后随便用你自己的话说说就好。"
             placeholder={hasReviewCols === false ? "请先完成上方数据库迁移" : "说说你的感觉…"}
             className="min-h-0 flex-1"
+            showHistorySkeleton={showHistorySkeleton}
+            streamingAssistantText={streamAssistantText}
             betweenScrollAndInput={
               hasReviewCols === true && userMessageCount >= 3 ? (
                 <Button
@@ -639,9 +760,7 @@ function Review() {
           </ul>
           <button
             type="button"
-            onClick={() => {
-              setSelectedDate(localYmd());
-            }}
+            onClick={() => void startTodaySession()}
             className={cn(
               "mt-2 w-full rounded-lg border border-dashed border-border px-2.5 py-2 text-left text-sm transition hover:bg-muted",
               selectedDate === localYmd() && "border-primary/40 bg-primary/5",
@@ -708,6 +827,8 @@ function Review() {
                 hasReviewCols === false ? "请先完成上方数据库迁移" : `聊聊今天的「${chatSubject}」…`
               }
               className="min-h-[320px] md:min-h-[420px]"
+              showHistorySkeleton={showHistorySkeleton}
+              streamingAssistantText={streamAssistantText}
               betweenScrollAndInput={
                 hasReviewCols === true && userMessageCount >= 3 ? (
                   <Button
