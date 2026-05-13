@@ -36,7 +36,7 @@ function AppShell() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground md:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground md:flex">
         <Link to="/app/today" className="mb-8 flex items-center gap-2.5 px-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
             S
@@ -51,18 +51,6 @@ function AppShell() {
                 ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                 : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
             }`;
-            if (t.to === "/app/today") {
-              return (
-                <button
-                  key={t.to}
-                  type="button"
-                  className={className}
-                  onClick={() => void nav({ to: "/app/today" })}
-                >
-                  <t.icon className="h-4 w-4 opacity-90" /> {t.label}
-                </button>
-              );
-            }
             return (
               <Link key={t.to} to={t.to} className={className}>
                 <t.icon className="h-4 w-4 opacity-90" /> {t.label}
@@ -97,19 +85,6 @@ function AppShell() {
             const className = `flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
               active ? "font-medium text-primary" : "text-muted-foreground"
             }`;
-            if (t.to === "/app/today") {
-              return (
-                <button
-                  key={t.to}
-                  type="button"
-                  className={className}
-                  onClick={() => void nav({ to: "/app/today" })}
-                >
-                  <t.icon className="h-5 w-5" />
-                  {t.label}
-                </button>
-              );
-            }
             return (
               <Link key={t.to} to={t.to} className={className}>
                 <t.icon className="h-5 w-5" />

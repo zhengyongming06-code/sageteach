@@ -28,8 +28,10 @@ function Signup() {
             if (pw.length < 8) return toast.error("密码至少 8 位，安全一点");
             setLoading(true);
             try {
-              await signUp(email, pw);
-              await signIn(email, pw);
+              const hasSession = await signUp(email, pw);
+              if (!hasSession) {
+                await signIn(email, pw);
+              }
               nav({ to: "/onboarding" });
             } catch (err) {
               toast.error((err as Error).message);

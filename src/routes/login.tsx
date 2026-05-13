@@ -38,6 +38,11 @@ function Login() {
         >
           <Input type="email" inputMode="email" autoComplete="email" required placeholder="邮箱" value={email} onChange={(e) => setEmail(e.target.value)} className="h-12 rounded-xl" />
           <Input type="password" autoComplete="current-password" required placeholder="密码" value={pw} onChange={(e) => setPw(e.target.value)} className="h-12 rounded-xl" />
+          <div className="text-right">
+            <Link to="/forgot-password" className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              忘记密码？
+            </Link>
+          </div>
           <Button type="submit" disabled={loading} className="h-12 w-full rounded-xl text-base">
             {loading ? "登录中…" : "登录"}
           </Button>
