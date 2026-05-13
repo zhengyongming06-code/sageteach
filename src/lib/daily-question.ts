@@ -32,7 +32,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { fetchDeepSeekReplyWithTimeout } from "@/lib/deepseek";
+import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
 
 export type DailyQuestionRow = {
   id: string;
@@ -111,12 +111,12 @@ Generate ONE short practice question to test if they've improved. Format:
   "explanation": "一句话解释，不超过50字"
 }
 Return ONLY valid JSON.`;
-  const raw = await fetchDeepSeekReplyWithTimeout(
+  const raw = await invokeDeepSeekChat(
     [
       { role: "system", content: sys },
       { role: "user", content: user },
     ],
-    45_000,
+    { max_tokens: 1500, timeoutMs: 45_000 },
   );
   const o = parseJsonObject(raw);
   const question = String(o.question ?? "").trim();
@@ -138,12 +138,12 @@ Student answer: ${params.studentAnswer}
 
 Decide if the student's answer is correct enough for a short recall question (meaning equivalent counts).
 Return ONLY JSON: {"correct":true} or {"correct":false}`;
-  const raw = await fetchDeepSeekReplyWithTimeout(
+  const raw = await invokeDeepSeekChat(
     [
       { role: "system", content: "Return only valid JSON." },
       { role: "user", content: user },
     ],
-    25_000,
+    { max_tokens: 500, timeoutMs: 25_000 },
   );
   const o = parseJsonObject(raw);
   if (typeof o.correct === "boolean") return o.correct;

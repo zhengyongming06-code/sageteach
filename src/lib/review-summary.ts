@@ -1,4 +1,4 @@
-import { fetchDeepSeekReplyWithTimeout } from "./deepseek";
+import { invokeDeepSeekChat } from "./deepseek-supabase";
 
 export const REVIEW_END_KEYWORDS = [
   "差不多了",
@@ -96,12 +96,12 @@ export async function requestReviewSummaryStructured(
   const userContent = buildReviewSummaryUserPrompt(conversation);
   let text: string;
   try {
-    text = await fetchDeepSeekReplyWithTimeout(
+    text = await invokeDeepSeekChat(
       [
         { role: "system", content: SUMMARY_SYSTEM },
         { role: "user", content: userContent },
       ],
-      SUMMARY_TIMEOUT_MS,
+      { max_tokens: 2000, timeoutMs: SUMMARY_TIMEOUT_MS },
     );
   } catch (e) {
     console.error("[review-summary] DeepSeek request failed", e);

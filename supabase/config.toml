@@ -1,6 +1,15 @@
-project_id = "oxmrryffurwjytpwscqv"
+project_id = "lqffeyniustvyegcigvy"
 
 # Local GoTrue: align access-token lifetime with a 7-day stay-signed-in goal.
 # Hosted projects: set the same under Dashboard → Authentication → JWT expiry (seconds).
 [auth]
 jwt_expiry = 604800
+
+# 本地 supabase start：注册后无需点邮件即可登录。托管项目请在 Dashboard 关闭 Confirm email。
+[auth.email]
+enable_confirmations = false
+
+# Browser preflight (OPTIONS) does not send Authorization; JWT check at the gateway
+# would return 401 and break CORS. Auth is still enforced inside the function body.
+[functions.deepseek-chat]
+verify_jwt = false

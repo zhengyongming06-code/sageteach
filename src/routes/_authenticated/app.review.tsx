@@ -14,7 +14,7 @@ import {
   reviewContextSuffix,
 } from "@/lib/sage-system-prompt";
 import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
-import { fetchDeepSeekReplyStreaming } from "@/lib/deepseek";
+import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
@@ -514,7 +514,7 @@ function Review() {
       setStreamAssistantText("");
       let reply: string;
       try {
-        reply = await fetchDeepSeekReplyStreaming(apiMessages, (t) => setStreamAssistantText(t));
+        reply = await invokeDeepSeekChat(apiMessages, { max_tokens: 2000 });
       } catch (streamErr) {
         setStreamAssistantText(null);
         throw streamErr;
@@ -623,55 +623,6 @@ function Review() {
     return <Outlet />;
   }
 
-  if (onboardingIncomplete) {
-    return (
-      <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-4 pb-2 md:min-h-[calc(100dvh-7rem)]">
-        {hasReviewCols === false && (
-          <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>需要数据库迁移</AlertTitle>
-            <AlertDescription className="text-sm">{MIGRATION_HINT}</AlertDescription>
-          </Alert>
-        )}
-
-        <div className="rounded-2xl border border-amber-200/80 bg-amber-50/95 px-4 py-3 text-center shadow-sm dark:border-amber-800/60 dark:bg-amber-950/40">
-          <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">第一次复盘 · 大约5分钟</p>
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col">
-          <SageChatPanel
-            expand
-            messages={messages}
-            draft={draft}
-            onDraftChange={setDraft}
-            onSubmit={() => void send()}
-            isSending={isSending}
-            emptyTitle="从这里开始"
-            emptyHint="先看 Sage 的第一条消息，然后随便用你自己的话说说就好。"
-            placeholder={hasReviewCols === false ? "请先完成上方数据库迁移" : "说说你的感觉…"}
-            className="min-h-0 flex-1"
-            showHistorySkeleton={showHistorySkeleton}
-            streamingAssistantText={streamAssistantText}
-            betweenScrollAndInput={
-              hasReviewCols === true && userMessageCount >= 3 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-full rounded-xl border-dashed"
-                  onClick={onEndReviewClick}
-                >
-                  结束复盘
-                </Button>
-              ) : null
-            }
-            belowForm={summaryBelow}
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex min-h-[calc(100dvh-9rem)] flex-col gap-5 pb-2 md:min-h-[calc(100dvh-7rem)]">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -697,7 +648,7 @@ function Review() {
         </Alert>
       )}
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+      <div className={cn("flex flex-col gap-4 lg:flex-row", onboardingIncomplete ? "lg:items-stretch" : "lg:items-start")}>
         <aside className="lg:w-56 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Sessions
@@ -770,26 +721,32 @@ function Review() {
           </button>
         </aside>
 
-        <div className="min-w-0 flex-1 space-y-4">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col space-y-4">
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">科目</p>
-            <div className="flex flex-wrap gap-2">
-              {SUBJECTS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSubject(s)}
-                  className={cn(
-                    "rounded-xl border px-3.5 py-2 text-sm font-medium transition",
-                    subject === s
-                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                      : "border-border bg-card text-foreground hover:border-ring/50",
-                  )}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+            {onboardingIncomplete ? (
+              <p className="text-sm text-muted-foreground">
+                首次复盘使用「{ONBOARDING_REVIEW_SUBJECT}」引导；完成后即可按科目复盘。
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {SUBJECTS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSubject(s)}
+                    className={cn(
+                      "rounded-xl border px-3.5 py-2 text-sm font-medium transition",
+                      subject === s
+                        ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                        : "border-border bg-card text-foreground hover:border-ring/50",
+                    )}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="md:hidden">
@@ -808,7 +765,7 @@ function Review() {
             </Select>
           </div>
 
-          {!hasSessionForSelectedDate && messages.length === 0 && (
+          {!onboardingIncomplete && !hasSessionForSelectedDate && messages.length === 0 && (
             <p className="text-xs text-muted-foreground">
               这是新会话；发第一条消息后，该日期会出现在左侧列表。
             </p>
@@ -821,12 +778,23 @@ function Review() {
               onDraftChange={setDraft}
               onSubmit={() => void send()}
               isSending={isSending}
-              emptyTitle="从这里开始复盘"
-              emptyHint="说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
-              placeholder={
-                hasReviewCols === false ? "请先完成上方数据库迁移" : `聊聊今天的「${chatSubject}」…`
+              emptyTitle={onboardingIncomplete ? "从这里开始" : "从这里开始复盘"}
+              emptyHint={
+                onboardingIncomplete
+                  ? "先看 Sage 的第一条消息，然后随便用你自己的话说说就好。"
+                  : "说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
               }
-              className="min-h-[320px] md:min-h-[420px]"
+              placeholder={
+                hasReviewCols === false
+                  ? "请先完成上方数据库迁移"
+                  : onboardingIncomplete
+                    ? "说说你的感觉…"
+                    : `聊聊今天的「${chatSubject}」…`
+              }
+              expand={onboardingIncomplete}
+              className={cn(
+                onboardingIncomplete ? "min-h-0 flex-1 md:min-h-[380px]" : "min-h-[320px] md:min-h-[420px]",
+              )}
               showHistorySkeleton={showHistorySkeleton}
               streamingAssistantText={streamAssistantText}
               betweenScrollAndInput={
