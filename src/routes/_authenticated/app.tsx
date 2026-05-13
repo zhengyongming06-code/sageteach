@@ -46,16 +46,25 @@ function AppShell() {
         <nav className="flex flex-col gap-0.5">
           {tabs.map((t) => {
             const active = path.startsWith(t.to);
+            const className = `flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+              active
+                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+            }`;
+            if (t.to === "/app/today") {
+              return (
+                <button
+                  key={t.to}
+                  type="button"
+                  className={className}
+                  onClick={() => void nav({ to: "/app/today" })}
+                >
+                  <t.icon className="h-4 w-4 opacity-90" /> {t.label}
+                </button>
+              );
+            }
             return (
-              <Link
-                key={t.to}
-                to={t.to}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition ${
-                  active
-                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-                }`}
-              >
+              <Link key={t.to} to={t.to} className={className}>
                 <t.icon className="h-4 w-4 opacity-90" /> {t.label}
               </Link>
             );
@@ -85,14 +94,24 @@ function AppShell() {
         <div className="mx-auto grid max-w-lg grid-cols-2">
           {tabs.map((t) => {
             const active = path.startsWith(t.to);
+            const className = `flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
+              active ? "font-medium text-primary" : "text-muted-foreground"
+            }`;
+            if (t.to === "/app/today") {
+              return (
+                <button
+                  key={t.to}
+                  type="button"
+                  className={className}
+                  onClick={() => void nav({ to: "/app/today" })}
+                >
+                  <t.icon className="h-5 w-5" />
+                  {t.label}
+                </button>
+              );
+            }
             return (
-              <Link
-                key={t.to}
-                to={t.to}
-                className={`flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
-                  active ? "font-medium text-primary" : "text-muted-foreground"
-                }`}
-              >
+              <Link key={t.to} to={t.to} className={className}>
                 <t.icon className="h-5 w-5" />
                 {t.label}
               </Link>

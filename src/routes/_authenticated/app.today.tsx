@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { subjectAccentCardClass, subjectBadgeClass } from "@/lib/subject-accent";
 import { fetchWeakArchive, formatArchiveDateLabel, persistTaskCompletion, type WeakArchiveRow } from "@/lib/weak-archive";
 import { fetchUserExams, pickNearestExam, syncProfileNearestExam, type UserExamRow } from "@/lib/user-exams";
+import { raceQueryTimeout } from "@/lib/query-timeout";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,8 @@ import {
 
 export const Route = createFileRoute("/_authenticated/app/today")({ component: Today });
 
+const TODAY_FETCH_MS = 1500;
+
 function localYmd(d = new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -31,45 +34,55 @@ function localYmd(d = new Date()) {
 }
 
 async function fetchTodayDailyProgress(userId: string): Promise<{ subjectCount: number; clearedCount: number }> {
-  const todayYmd = localYmd();
-  const { data: summaries, error } = await supabase
-    .from("review_summaries")
-    .select("subject")
-    .eq("user_id", userId)
-    .eq("session_date", todayYmd);
-  if (error) throw error;
-  const subjects = new Set((summaries ?? []).map((r) => r.subject).filter(Boolean));
+  try {
+    const todayYmd = localYmd();
+    const { data: summaries, error } = await supabase
+      .from("review_summaries")
+      .select("subject")
+      .eq("user_id", userId)
+      .eq("session_date", todayYmd);
+    if (error) throw error;
+    const subjects = new Set((summaries ?? []).map((r) => r.subject).filter(Boolean));
 
-  const { data: comps, error: e2 } = await supabase
-    .from("task_completions")
-    .select("updated_at")
-    .eq("user_id", userId)
-    .eq("completed", true);
-  if (e2) throw e2;
-  const [y, mo, da] = todayYmd.split("-").map(Number);
-  const clearedCount = (comps ?? []).filter((r) => {
-    const dt = new Date(r.updated_at);
-    return dt.getFullYear() === y && dt.getMonth() + 1 === mo && dt.getDate() === da;
-  }).length;
+    const { data: comps, error: e2 } = await supabase
+      .from("task_completions")
+      .select("updated_at")
+      .eq("user_id", userId)
+      .eq("completed", true);
+    if (e2) throw e2;
+    const [y, mo, da] = todayYmd.split("-").map(Number);
+    const clearedCount = (comps ?? []).filter((r) => {
+      const dt = new Date(r.updated_at);
+      return dt.getFullYear() === y && dt.getMonth() + 1 === mo && dt.getDate() === da;
+    }).length;
 
-  return { subjectCount: subjects.size, clearedCount };
+    return { subjectCount: subjects.size, clearedCount };
+  } catch (e) {
+    console.warn("[today-daily-progress]", e);
+    return { subjectCount: 0, clearedCount: 0 };
+  }
 }
 
 async function fetchPendingSageHook(userId: string): Promise<string | null> {
-  const todayYmd = localYmd();
-  const { data, error } = await supabase
-    .from("review_summaries")
-    .select("follow_up")
-    .eq("user_id", userId)
-    .not("follow_up", "is", null)
-    .neq("follow_up", "")
-    .lt("session_date", todayYmd)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  const t = data?.follow_up?.trim();
-  return t && t.length > 0 ? t : null;
+  try {
+    const todayYmd = localYmd();
+    const { data, error } = await supabase
+      .from("review_summaries")
+      .select("follow_up")
+      .eq("user_id", userId)
+      .not("follow_up", "is", null)
+      .neq("follow_up", "")
+      .lt("session_date", todayYmd)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    const t = data?.follow_up?.trim();
+    return t && t.length > 0 ? t : null;
+  } catch (e) {
+    console.warn("[today-sage-hook]", e);
+    return null;
+  }
 }
 
 type ProfileRow = {
@@ -90,31 +103,36 @@ type TodayTaskRow = {
 };
 
 async function fetchTodayTasks(userId: string, opts?: { limit?: number }): Promise<TodayTaskRow[]> {
-  const cap = opts?.limit ?? 3;
-  const { data: summaries, error: sErr } = await supabase
-    .from("review_summaries")
-    .select("id,subject,tonight_task,created_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(24);
-  if (sErr) throw sErr;
-  const trimmed = (summaries ?? []).filter((r) => String(r.tonight_task ?? "").trim() !== "");
-  const top = trimmed.slice(0, cap);
-  if (top.length === 0) return [];
-  const ids = top.map((r) => r.id);
-  const { data: comps, error: cErr } = await supabase
-    .from("task_completions")
-    .select("review_summary_id,completed")
-    .eq("user_id", userId)
-    .in("review_summary_id", ids);
-  if (cErr) throw cErr;
-  const map = new Map((comps ?? []).map((c) => [c.review_summary_id, c.completed]));
-  return top.map((r) => ({
-    id: r.id,
-    subject: r.subject,
-    tonight_task: String(r.tonight_task).trim(),
-    completed: map.get(r.id) ?? false,
-  }));
+  try {
+    const cap = opts?.limit ?? 3;
+    const { data: summaries, error: sErr } = await supabase
+      .from("review_summaries")
+      .select("id,subject,tonight_task,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(24);
+    if (sErr) throw sErr;
+    const trimmed = (summaries ?? []).filter((r) => String(r.tonight_task ?? "").trim() !== "");
+    const top = trimmed.slice(0, cap);
+    if (top.length === 0) return [];
+    const ids = top.map((r) => r.id);
+    const { data: comps, error: cErr } = await supabase
+      .from("task_completions")
+      .select("review_summary_id,completed")
+      .eq("user_id", userId)
+      .in("review_summary_id", ids);
+    if (cErr) throw cErr;
+    const map = new Map((comps ?? []).map((c) => [c.review_summary_id, c.completed]));
+    return top.map((r) => ({
+      id: r.id,
+      subject: r.subject,
+      tonight_task: String(r.tonight_task).trim(),
+      completed: map.get(r.id) ?? false,
+    }));
+  } catch (e) {
+    console.warn("[today-tasks]", e);
+    return [];
+  }
 }
 
 function Today() {
@@ -131,7 +149,14 @@ function Today() {
   const { data: examRows = [] } = useQuery({
     queryKey: ["user-exams", user?.id],
     enabled: !!user?.id,
-    queryFn: () => fetchUserExams(user!.id),
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, [], async () => {
+        try {
+          return await fetchUserExams(user!.id);
+        } catch {
+          return [];
+        }
+      }),
     staleTime: 30_000,
   });
 
@@ -144,21 +169,26 @@ function Today() {
 
   const [examScheduleOpen, setExamScheduleOpen] = useState(false);
 
-  const {
-    data: profileFlags,
-    isSuccess: profileFlagsReady,
-    isError: profileFlagsError,
-  } = useQuery({
+  const { data: profileFlags, isFetched: profileFlagsFetched } = useQuery({
     queryKey: ["profile-flags", user?.id],
     enabled: !!user?.id,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("review_onboarding_complete")
-        .eq("id", user!.id)
-        .maybeSingle();
-      if (error) throw error;
-      return data as { review_onboarding_complete: boolean } | null;
+    retry: false,
+    queryFn: async (): Promise<{ needsGuidedReviewOnboarding: boolean }> => {
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("review_onboarding_complete")
+          .eq("id", user!.id)
+          .maybeSingle();
+        if (error) {
+          console.warn("[profiles] today profile flags skipped", error);
+          return { needsGuidedReviewOnboarding: false };
+        }
+        return { needsGuidedReviewOnboarding: data?.review_onboarding_complete === false };
+      } catch (e) {
+        console.warn("[profiles] today profile flags skipped", e);
+        return { needsGuidedReviewOnboarding: false };
+      }
     },
   });
 
@@ -169,34 +199,34 @@ function Today() {
       return;
     }
     setLoadDeadlinePassed(false);
-    const t = window.setTimeout(() => setLoadDeadlinePassed(true), 3000);
+    const t = window.setTimeout(() => setLoadDeadlinePassed(true), TODAY_FETCH_MS);
     return () => window.clearTimeout(t);
   }, [user?.id]);
-
-  const profileGateReady = profileFlagsReady || profileFlagsError || loadDeadlinePassed;
-  const profileFlagsResolved = profileFlagsReady || profileFlagsError;
-  const reviewOnboardingDone =
-    profileFlags?.review_onboarding_complete === true ||
-    (loadDeadlinePassed && !profileFlagsResolved);
 
   const { data: summaryCount, isSuccess: summaryCountReady, isError: summaryCountError } = useQuery({
     queryKey: ["review-summary-meta", user?.id],
     enabled: !!user?.id,
-    queryFn: async () => {
-      const { count, error } = await supabase
-        .from("review_summaries")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user!.id);
-      if (error) throw error;
-      return count ?? 0;
-    },
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, 0, async () => {
+        try {
+          const { count, error } = await supabase
+            .from("review_summaries")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user!.id);
+          if (error) throw error;
+          return count ?? 0;
+        } catch (e) {
+          console.warn("[review-summary-meta]", e);
+          return 0;
+        }
+      }),
   });
 
   useEffect(() => {
-    if (!profileGateReady || profileFlagsError) return;
-    if (reviewOnboardingDone) return;
+    if (!profileFlagsFetched) return;
+    if (profileFlags?.needsGuidedReviewOnboarding !== true) return;
     nav({ to: "/app/review", replace: true });
-  }, [profileGateReady, profileFlagsError, reviewOnboardingDone, nav]);
+  }, [profileFlagsFetched, profileFlags?.needsGuidedReviewOnboarding, nav]);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -205,7 +235,6 @@ function Today() {
       void qc.invalidateQueries({ queryKey: ["today-tasks", user.id] });
       void qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] });
       void qc.invalidateQueries({ queryKey: ["user-exams", user.id] });
-      // void qc.invalidateQueries({ queryKey: ["daily-question", user.id] });
     };
     window.addEventListener("sage-weak-archive-refresh", onRefresh);
     return () => window.removeEventListener("sage-weak-archive-refresh", onRefresh);
@@ -213,16 +242,22 @@ function Today() {
 
   const loadProfile = useCallback(async () => {
     if (!user) return;
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("display_name,current_score,target_score")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("display_name,current_score,target_score")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.warn("[profiles] today loadProfile", error);
+        setProfile({});
+        return;
+      }
+      setProfile(data ?? {});
+    } catch (e) {
+      console.warn("[profiles] today loadProfile", e);
+      setProfile({});
     }
-    setProfile(data);
   }, [user]);
 
   useEffect(() => {
@@ -236,7 +271,10 @@ function Today() {
   } = useQuery({
     queryKey: ["today-tasks", user?.id, examSprint ? 1 : 3],
     enabled: !!user?.id,
-    queryFn: () => fetchTodayTasks(user!.id, { limit: examSprint ? 1 : 3 }),
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, [], () =>
+        fetchTodayTasks(user!.id, { limit: examSprint ? 1 : 3 }),
+      ),
   });
 
   const {
@@ -246,7 +284,15 @@ function Today() {
   } = useQuery({
     queryKey: ["weak-point-archive", user?.id],
     enabled: !!user?.id,
-    queryFn: () => fetchWeakArchive(user!.id),
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, [], async () => {
+        try {
+          return await fetchWeakArchive(user!.id);
+        } catch (e) {
+          console.warn("[weak-point-archive]", e);
+          return [];
+        }
+      }),
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
@@ -258,7 +304,10 @@ function Today() {
   } = useQuery({
     queryKey: ["today-daily-progress", user?.id],
     enabled: !!user?.id,
-    queryFn: () => fetchTodayDailyProgress(user!.id),
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, { subjectCount: 0, clearedCount: 0 }, () =>
+        fetchTodayDailyProgress(user!.id),
+      ),
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
@@ -266,7 +315,8 @@ function Today() {
   const { data: pendingFollowUp } = useQuery({
     queryKey: ["today-sage-hook", user?.id],
     enabled: !!user?.id,
-    queryFn: () => fetchPendingSageHook(user!.id),
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, null, () => fetchPendingSageHook(user!.id)),
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
@@ -402,22 +452,6 @@ function Today() {
     },
     [toggleTaskComplete],
   );
-
-  if (!profileGateReady) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center text-sm text-muted-foreground">
-        <p>加载中…</p>
-      </div>
-    );
-  }
-
-  if (!profileFlagsError && !reviewOnboardingDone) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center text-sm text-muted-foreground">
-        <p>正在带你去复盘页…</p>
-      </div>
-    );
-  }
 
   // const showDailyQuestion = summaryCountReady && !summaryCountError && (summaryCount ?? 0) > 0;
 
@@ -699,7 +733,14 @@ function ExamScheduleDialog({
   const qc = useQueryClient();
   const { data: rows = [] } = useQuery({
     queryKey: ["user-exams", userId],
-    queryFn: () => fetchUserExams(userId),
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, [], async () => {
+        try {
+          return await fetchUserExams(userId);
+        } catch {
+          return [];
+        }
+      }),
     enabled: open && !!userId,
   });
   const [formName, setFormName] = useState("");
