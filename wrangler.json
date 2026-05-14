@@ -1,7 +1,9 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sageteach",
-  "compatibility_date": "2025-09-24",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2024-09-23",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "src/server.ts"
+  "assets": {
+    "directory": "./dist/client"
+  }
 }
