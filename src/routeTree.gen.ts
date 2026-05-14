@@ -11,15 +11,16 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthUpdatePasswordRouteImport } from './routes/auth.update-password'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated/onboarding'
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
 import { Route as AuthenticatedAppTodayRouteImport } from './routes/_authenticated/app.today'
 import { Route as AuthenticatedAppReviewRouteImport } from './routes/_authenticated/app.review'
-import { Route as AuthenticatedAppPlanRouteImport } from './routes/_authenticated/app.plan'
 import { Route as AuthenticatedAppCoachRouteImport } from './routes/_authenticated/app.coach'
-import { Route as AuthenticatedAppArticlesRouteImport } from './routes/_authenticated/app.articles'
+import { Route as AuthenticatedAppReviewArchiveRouteImport } from './routes/_authenticated/app.review.archive'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -31,6 +32,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
@@ -38,6 +44,11 @@ const AuthenticatedRoute = AuthenticatedRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthUpdatePasswordRoute = AuthUpdatePasswordRouteImport.update({
+  id: '/auth/update-password',
+  path: '/auth/update-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedOnboardingRoute = AuthenticatedOnboardingRouteImport.update({
@@ -60,106 +71,109 @@ const AuthenticatedAppReviewRoute = AuthenticatedAppReviewRouteImport.update({
   path: '/review',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
-const AuthenticatedAppPlanRoute = AuthenticatedAppPlanRouteImport.update({
-  id: '/plan',
-  path: '/plan',
-  getParentRoute: () => AuthenticatedAppRoute,
-} as any)
 const AuthenticatedAppCoachRoute = AuthenticatedAppCoachRouteImport.update({
   id: '/coach',
   path: '/coach',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
-const AuthenticatedAppArticlesRoute =
-  AuthenticatedAppArticlesRouteImport.update({
-    id: '/articles',
-    path: '/articles',
-    getParentRoute: () => AuthenticatedAppRoute,
+const AuthenticatedAppReviewArchiveRoute =
+  AuthenticatedAppReviewArchiveRouteImport.update({
+    id: '/archive',
+    path: '/archive',
+    getParentRoute: () => AuthenticatedAppReviewRoute,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/app': typeof AuthenticatedAppRouteWithChildren
   '/onboarding': typeof AuthenticatedOnboardingRoute
-  '/app/articles': typeof AuthenticatedAppArticlesRoute
+  '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/app/coach': typeof AuthenticatedAppCoachRoute
-  '/app/plan': typeof AuthenticatedAppPlanRoute
-  '/app/review': typeof AuthenticatedAppReviewRoute
+  '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
+  '/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/app': typeof AuthenticatedAppRouteWithChildren
   '/onboarding': typeof AuthenticatedOnboardingRoute
-  '/app/articles': typeof AuthenticatedAppArticlesRoute
+  '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/app/coach': typeof AuthenticatedAppCoachRoute
-  '/app/plan': typeof AuthenticatedAppPlanRoute
-  '/app/review': typeof AuthenticatedAppReviewRoute
+  '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
+  '/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/_authenticated/app': typeof AuthenticatedAppRouteWithChildren
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
-  '/_authenticated/app/articles': typeof AuthenticatedAppArticlesRoute
+  '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/_authenticated/app/coach': typeof AuthenticatedAppCoachRoute
-  '/_authenticated/app/plan': typeof AuthenticatedAppPlanRoute
-  '/_authenticated/app/review': typeof AuthenticatedAppReviewRoute
+  '/_authenticated/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/_authenticated/app/today': typeof AuthenticatedAppTodayRoute
+  '/_authenticated/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/forgot-password'
     | '/login'
     | '/signup'
     | '/app'
     | '/onboarding'
-    | '/app/articles'
+    | '/auth/update-password'
     | '/app/coach'
-    | '/app/plan'
     | '/app/review'
     | '/app/today'
+    | '/app/review/archive'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/forgot-password'
     | '/login'
     | '/signup'
     | '/app'
     | '/onboarding'
-    | '/app/articles'
+    | '/auth/update-password'
     | '/app/coach'
-    | '/app/plan'
     | '/app/review'
     | '/app/today'
+    | '/app/review/archive'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/forgot-password'
     | '/login'
     | '/signup'
     | '/_authenticated/app'
     | '/_authenticated/onboarding'
-    | '/_authenticated/app/articles'
+    | '/auth/update-password'
     | '/_authenticated/app/coach'
-    | '/_authenticated/app/plan'
     | '/_authenticated/app/review'
     | '/_authenticated/app/today'
+    | '/_authenticated/app/review/archive'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
+  AuthUpdatePasswordRoute: typeof AuthUpdatePasswordRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -178,6 +192,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
@@ -190,6 +211,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/update-password': {
+      id: '/auth/update-password'
+      path: '/auth/update-password'
+      fullPath: '/auth/update-password'
+      preLoaderRoute: typeof AuthUpdatePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/onboarding': {
@@ -220,13 +248,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppReviewRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
-    '/_authenticated/app/plan': {
-      id: '/_authenticated/app/plan'
-      path: '/plan'
-      fullPath: '/app/plan'
-      preLoaderRoute: typeof AuthenticatedAppPlanRouteImport
-      parentRoute: typeof AuthenticatedAppRoute
-    }
     '/_authenticated/app/coach': {
       id: '/_authenticated/app/coach'
       path: '/coach'
@@ -234,29 +255,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppCoachRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
-    '/_authenticated/app/articles': {
-      id: '/_authenticated/app/articles'
-      path: '/articles'
-      fullPath: '/app/articles'
-      preLoaderRoute: typeof AuthenticatedAppArticlesRouteImport
-      parentRoute: typeof AuthenticatedAppRoute
+    '/_authenticated/app/review/archive': {
+      id: '/_authenticated/app/review/archive'
+      path: '/archive'
+      fullPath: '/app/review/archive'
+      preLoaderRoute: typeof AuthenticatedAppReviewArchiveRouteImport
+      parentRoute: typeof AuthenticatedAppReviewRoute
     }
   }
 }
 
+interface AuthenticatedAppReviewRouteChildren {
+  AuthenticatedAppReviewArchiveRoute: typeof AuthenticatedAppReviewArchiveRoute
+}
+
+const AuthenticatedAppReviewRouteChildren: AuthenticatedAppReviewRouteChildren =
+  {
+    AuthenticatedAppReviewArchiveRoute: AuthenticatedAppReviewArchiveRoute,
+  }
+
+const AuthenticatedAppReviewRouteWithChildren =
+  AuthenticatedAppReviewRoute._addFileChildren(
+    AuthenticatedAppReviewRouteChildren,
+  )
+
 interface AuthenticatedAppRouteChildren {
-  AuthenticatedAppArticlesRoute: typeof AuthenticatedAppArticlesRoute
   AuthenticatedAppCoachRoute: typeof AuthenticatedAppCoachRoute
-  AuthenticatedAppPlanRoute: typeof AuthenticatedAppPlanRoute
-  AuthenticatedAppReviewRoute: typeof AuthenticatedAppReviewRoute
+  AuthenticatedAppReviewRoute: typeof AuthenticatedAppReviewRouteWithChildren
   AuthenticatedAppTodayRoute: typeof AuthenticatedAppTodayRoute
 }
 
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
-  AuthenticatedAppArticlesRoute: AuthenticatedAppArticlesRoute,
   AuthenticatedAppCoachRoute: AuthenticatedAppCoachRoute,
-  AuthenticatedAppPlanRoute: AuthenticatedAppPlanRoute,
-  AuthenticatedAppReviewRoute: AuthenticatedAppReviewRoute,
+  AuthenticatedAppReviewRoute: AuthenticatedAppReviewRouteWithChildren,
   AuthenticatedAppTodayRoute: AuthenticatedAppTodayRoute,
 }
 
@@ -280,8 +311,10 @@ const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
+  AuthUpdatePasswordRoute: AuthUpdatePasswordRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

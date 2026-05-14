@@ -8,10 +8,10 @@ export const Route = createFileRoute("/")({
 });
 
 const features = [
-  { icon: Brain, title: "学科复盘", desc: "不是写日记，是把今天的失误拆成可修复的几步。" },
-  { icon: LineChart, title: "提分规划", desc: "按 ROI 排序你的学科，告诉你哪 20% 拿走 80% 的分。" },
-  { icon: HeartPulse, title: "焦虑疏导", desc: "晚上 11 点崩了的时候，有人陪你拆掉那团乱麻。" },
-  { icon: Compass, title: "AI 教练", desc: "记得你过去的弱点和反复，回答像学长，不像机器。" },
+  { icon: Brain, title: "学科复盘", desc: "今天哪道题让你卡了最久？说出来，拆开看。" },
+  { icon: LineChart, title: "提分规划", desc: "离目标还差多少分，先搞清楚该把时间花在哪。" },
+  { icon: HeartPulse, title: "焦虑疏导", desc: "学不进去、又不敢停下来——这种感觉我懂。" },
+  { icon: Compass, title: "AI 教练", desc: "它记得你上次卡在哪，不会每次都从头问你。" },
 ];
 
 function Landing() {
@@ -85,7 +85,7 @@ function Landing() {
           <p className="text-balance font-serif text-xl leading-relaxed text-warm-foreground sm:text-2xl">
             成功就是做那些常人坚持不下去的事情，不断突破和超越自己
           </p>
-          <p className="mt-4 text-sm text-muted-foreground/80">— Simon</p>
+          <p className="mt-4 text-right text-base italic leading-relaxed text-muted-foreground/80">— Simon</p>
         </section>
       </main>
 
