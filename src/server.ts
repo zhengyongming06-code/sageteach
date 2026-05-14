@@ -12,17 +12,21 @@ type CfWorkerEnv = {
   ASSETS?: { fetch(input: Request | string, init?: RequestInit): Promise<Response> };
 };
 
-/**
- * Serve hashed client bundles from `dist/client` before TanStack SSR.
- * Fixes 404 when the framework does not delegate `/assets/*` to the ASSETS binding.
- */
-async function tryServeStaticAssets(request: Request, env: CfWorkerEnv): Promise<Response | null> {
+function shouldServeFromAssetsBinding(pathname: string): boolean {
+  return (
+    pathname.startsWith("/assets/") ||
+    pathname.startsWith("/_assets/") ||
+    pathname === "/favicon.ico"
+  );
+}
+
+/** Static files from `wrangler.json` `assets.directory` (bound as `ASSETS`), before SSR. */
+async function serveStaticFromBinding(request: Request, env: CfWorkerEnv): Promise<Response | null> {
+  const { pathname } = new URL(request.url);
+  if (!shouldServeFromAssetsBinding(pathname)) return null;
   const { ASSETS } = env;
   if (!ASSETS) return null;
-  const { pathname } = new URL(request.url);
-  if (!pathname.startsWith("/assets/") && !pathname.startsWith("/_assets/")) return null;
-  const res = await ASSETS.fetch(request);
-  return res.status === 404 ? null : res;
+  return ASSETS.fetch(request);
 }
 
 let serverEntryPromise: Promise<ServerEntry> | undefined;
@@ -87,7 +91,7 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
-      const staticRes = await tryServeStaticAssets(request, env as CfWorkerEnv);
+      const staticRes = await serveStaticFromBinding(request, env as CfWorkerEnv);
       if (staticRes) return staticRes;
 
       const handler = await getServerEntry();
