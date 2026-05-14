@@ -3,7 +3,35 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
+
+/** Block javascript:/data: and other non-http(s) schemes in assistant Markdown. */
+function markdownUrlTransform(url: string): string {
+  const s = url.trim();
+  if (!s) return "";
+  const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(s);
+  if (schemeMatch) {
+    const scheme = schemeMatch[1].toLowerCase();
+    if (scheme === "http" || scheme === "https") return s;
+    return "";
+  }
+  if (s.startsWith("//")) return "";
+  return s;
+}
+
+const markdownComponents: Components = {
+  a({ node: _n, children, href, ...rest }) {
+    if (!href) {
+      return <span className="underline decoration-primary/40">{children}</span>;
+    }
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
+        {children}
+      </a>
+    );
+  },
+};
 
 export type SageChatMessage = {
   id: string;
@@ -31,6 +59,8 @@ type SageChatPanelProps = {
   showHistorySkeleton?: boolean;
   /** Partial assistant reply while streaming from the model; trailing ▋ is rendered in the panel. */
   streamingAssistantText?: string | null;
+  /** Subtle status under the composer (e.g. retry hint). */
+  composerHint?: string | null;
 };
 
 export function SageChatPanel({
@@ -48,13 +78,11 @@ export function SageChatPanel({
   belowForm,
   showHistorySkeleton = false,
   streamingAssistantText = null,
+  composerHint = null,
 }: SageChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const empty =
-    messages.length === 0 &&
-    !isSending &&
-    !showHistorySkeleton &&
-    streamingAssistantText == null;
+    messages.length === 0 && !isSending && !showHistorySkeleton && streamingAssistantText == null;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -64,7 +92,8 @@ export function SageChatPanel({
     });
   }, [messages, isSending, streamingAssistantText]);
 
-  const showTypingDots = isSending && (streamingAssistantText == null || streamingAssistantText === "");
+  const showTypingDots =
+    isSending && (streamingAssistantText == null || streamingAssistantText === "");
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
@@ -109,7 +138,12 @@ export function SageChatPanel({
             >
               {msg.role === "assistant" ? (
                 <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown
+                    urlTransform={markdownUrlTransform}
+                    components={markdownComponents}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
                 </div>
               ) : (
                 <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -122,9 +156,17 @@ export function SageChatPanel({
             <div className="max-w-[88%] rounded-2xl border border-border bg-background px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
               <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
                 {streamingAssistantText !== "" ? (
-                  <ReactMarkdown>{streamingAssistantText}</ReactMarkdown>
+                  <ReactMarkdown
+                    urlTransform={markdownUrlTransform}
+                    components={markdownComponents}
+                  >
+                    {streamingAssistantText}
+                  </ReactMarkdown>
                 ) : null}
-                <span className="ml-0.5 inline-block animate-pulse select-none font-mono text-primary" aria-hidden>
+                <span
+                  className="ml-0.5 inline-block animate-pulse select-none font-mono text-primary"
+                  aria-hidden
+                >
                   ▋
                 </span>
               </div>
@@ -145,6 +187,12 @@ export function SageChatPanel({
       </div>
 
       {betweenScrollAndInput ? <div className="mt-3 shrink-0">{betweenScrollAndInput}</div> : null}
+
+      {composerHint ? (
+        <p className="mt-2 text-center text-xs text-muted-foreground/90 tabular-nums">
+          {composerHint}
+        </p>
+      ) : null}
 
       <form
         className="mt-3 flex items-end gap-2"

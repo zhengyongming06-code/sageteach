@@ -1,7 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import type { DeepSeekMessage } from "./deepseek-types";
+import { assertValidDeepSeekProxyPayload } from "./deepseek-proxy-validation";
+
+function logUpstreamResponse(context: string, status: number, raw: string) {
+  console.error(`[${context}] upstream non-JSON or error body`, {
+    status,
+    length: raw.length,
+    snippet: raw.slice(0, 800),
+  });
+}
 
 /**
  * Server-only: forwards chat to DeepSeek.
@@ -10,19 +18,17 @@ import type { DeepSeekMessage } from "./deepseek-types";
  */
 export const proxyDeepSeekEdge = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { messages: DeepSeekMessage[]; max_tokens?: number }) => {
-    if (!Array.isArray(d?.messages)) throw new Error("messages required");
-    return d;
+  .inputValidator((d: { messages: unknown; max_tokens?: unknown }) => {
+    return assertValidDeepSeekProxyPayload(d);
   })
   .handler(async ({ data, signal }) => {
     const req = getRequest();
-    const auth =
-      req?.headers?.get("Authorization") ?? req?.headers?.get("authorization") ?? "";
+    const auth = req?.headers?.get("Authorization") ?? req?.headers?.get("authorization") ?? "";
     if (!auth.startsWith("Bearer ")) {
       throw new Error("Unauthorized");
     }
 
-    const max_tokens = typeof data.max_tokens === "number" ? data.max_tokens : 1000;
+    const { messages, max_tokens } = data;
     const deepseekKey = process.env.DEEPSEEK_API_KEY?.trim();
 
     /** Prefer direct DeepSeek on the app server to avoid Supabase Edge rate limits (429). */
@@ -39,7 +45,7 @@ export const proxyDeepSeekEdge = createServerFn({ method: "POST" })
         },
         body: JSON.stringify({
           model: "deepseek-chat",
-          messages: data.messages,
+          messages,
           max_tokens,
           stream: false,
         }),
@@ -49,20 +55,21 @@ export const proxyDeepSeekEdge = createServerFn({ method: "POST" })
       try {
         json = JSON.parse(raw) as unknown;
       } catch {
-        throw new Error(raw.slice(0, 240) || "DeepSeek returned non-JSON");
+        logUpstreamResponse("deepseek-direct", res.status, raw);
+        throw new Error("AI 服务返回格式异常，请稍后重试。");
       }
       if (!res.ok) {
-        const msg =
-          typeof json === "object" && json !== null && "error" in json
-            ? String((json as { error?: { message?: string } }).error?.message ?? raw.slice(0, 200))
-            : raw.slice(0, 200);
-        throw new Error(msg || `DeepSeek HTTP ${res.status}`);
+        logUpstreamResponse("deepseek-direct", res.status, raw);
+        throw new Error(`AI 服务暂时不可用（${res.status}）`);
       }
-      const choices = (json as { choices?: Array<{ message?: { content?: string | null } }> })?.choices;
+      const choices = (json as { choices?: Array<{ message?: { content?: string | null } }> })
+        ?.choices;
       const text = choices?.[0]?.message?.content?.trim();
       if (text) return { text };
-      const errMsg = (json as { error?: { message?: string } }).error?.message;
-      if (errMsg) throw new Error(errMsg);
+      console.error("[deepseek-direct] empty choices", {
+        status: res.status,
+        keys: json && typeof json === "object" ? Object.keys(json as object) : [],
+      });
       throw new Error("AI 没有返回内容，再试一次。");
     };
 
@@ -84,7 +91,7 @@ export const proxyDeepSeekEdge = createServerFn({ method: "POST" })
         Authorization: auth,
         apikey: anon,
       },
-      body: JSON.stringify({ messages: data.messages, max_tokens }),
+      body: JSON.stringify({ messages, max_tokens }),
     });
 
     const raw = await res.text();
@@ -92,22 +99,20 @@ export const proxyDeepSeekEdge = createServerFn({ method: "POST" })
     try {
       json = JSON.parse(raw) as unknown;
     } catch {
-      throw new Error(raw.slice(0, 240) || "Edge function returned non-JSON");
+      logUpstreamResponse("deepseek-edge-fn", res.status, raw);
+      throw new Error("AI 服务返回格式异常，请稍后重试。");
     }
 
     if (!res.ok) {
-      const msg =
-        typeof json === "object" && json !== null && "error" in json
-          ? String((json as { error?: { message?: string } }).error?.message ?? raw.slice(0, 200))
-          : raw.slice(0, 200);
-      throw new Error(msg || `Edge function HTTP ${res.status}`);
+      logUpstreamResponse("deepseek-edge-fn", res.status, raw);
+      throw new Error(`AI 服务暂时不可用（${res.status}）`);
     }
 
-    const choices = (json as { choices?: Array<{ message?: { content?: string | null } }> })?.choices;
+    const choices = (json as { choices?: Array<{ message?: { content?: string | null } }> })
+      ?.choices;
     const text = choices?.[0]?.message?.content?.trim();
     if (text) return { text };
 
-    const errMsg = (json as { error?: { message?: string } }).error?.message;
-    if (errMsg) throw new Error(errMsg);
+    console.error("[deepseek-edge-fn] empty choices", { status: res.status });
     throw new Error("AI 没有返回内容，再试一次。");
   });

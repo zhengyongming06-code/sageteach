@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -137,7 +137,6 @@ async function fetchTodayTasks(userId: string, opts?: { limit?: number }): Promi
 
 function Today() {
   const { user } = useAuth();
-  const nav = useNavigate();
   const qc = useQueryClient();
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [editing, setEditing] = useState<EditingField>(null);
@@ -221,12 +220,6 @@ function Today() {
         }
       }),
   });
-
-  useEffect(() => {
-    if (!profileFlagsFetched) return;
-    if (profileFlags?.needsGuidedReviewOnboarding !== true) return;
-    nav({ to: "/app/review", replace: true });
-  }, [profileFlagsFetched, profileFlags?.needsGuidedReviewOnboarding, nav]);
 
   useEffect(() => {
     const onRefresh = () => {

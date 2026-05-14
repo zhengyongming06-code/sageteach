@@ -53,6 +53,7 @@ export type Database = {
           created_at: string
           id: string
           review_session_date: string | null
+          review_session_slug: string | null
           review_subject: string | null
           role: string
           user_id: string
@@ -62,6 +63,7 @@ export type Database = {
           created_at?: string
           id?: string
           review_session_date?: string | null
+          review_session_slug?: string | null
           review_subject?: string | null
           role: string
           user_id: string
@@ -71,6 +73,7 @@ export type Database = {
           created_at?: string
           id?: string
           review_session_date?: string | null
+          review_session_slug?: string | null
           review_subject?: string | null
           role?: string
           user_id?: string
@@ -188,6 +191,7 @@ export type Database = {
           follow_up: string
           id: string
           mastered: string | null
+          review_session_slug: string | null
           session_date: string
           subject: string
           tonight_task: string
@@ -199,6 +203,7 @@ export type Database = {
           follow_up: string
           id?: string
           mastered?: string | null
+          review_session_slug?: string | null
           session_date?: string
           subject: string
           tonight_task: string
@@ -210,6 +215,7 @@ export type Database = {
           follow_up?: string
           id?: string
           mastered?: string | null
+          review_session_slug?: string | null
           session_date?: string
           subject?: string
           tonight_task?: string

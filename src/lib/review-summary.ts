@@ -1,15 +1,5 @@
 import { invokeDeepSeekChat } from "./deepseek-supabase";
 
-export const REVIEW_END_KEYWORDS = [
-  "差不多了",
-  "结束了",
-  "结束",
-  "好了",
-  "我去学了",
-  "拜",
-  "谢谢",
-] as const;
-
 export type ReviewSummaryPayload = {
   subject: string;
   weak_point: string;
@@ -17,12 +7,6 @@ export type ReviewSummaryPayload = {
   follow_up: string;
   mastered: string | null;
 };
-
-export function userEndsReviewSession(userText: string): boolean {
-  const t = userText.trim();
-  if (!t) return false;
-  return REVIEW_END_KEYWORDS.some((k) => t.includes(k));
-}
 
 export function formatReviewConversationForSummary(
   rows: { role: string; content: string }[],

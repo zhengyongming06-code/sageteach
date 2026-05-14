@@ -14,7 +14,7 @@ import {
   reviewContextSuffix,
 } from "@/lib/sage-system-prompt";
 import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
-import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
+import { invokeDeepSeekChat, isRetryableNetworkFailure } from "@/lib/deepseek-supabase";
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
@@ -27,9 +27,23 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { coachMessagesHasReviewColumns, MIGRATION_HINT } from "@/lib/coach-messages-schema";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertCircle } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { MoreHorizontal } from "lucide-react";
 import {
   ONBOARDING_REVIEW_SUBJECT,
   POST_FIRST_ONBOARDING_SESSION_CLOSING,
@@ -41,13 +55,18 @@ import { assistantSignalsCorrectness } from "@/lib/review-positive-feedback";
 import {
   formatReviewConversationForSummary,
   requestReviewSummaryStructured,
-  userEndsReviewSession,
 } from "@/lib/review-summary";
 
 /** Invisible thread anchor: listed in session index, excluded from chat (role system). */
 const REVIEW_SESSION_ANCHOR = "__review_session_anchor_v1__";
 
-type CoachMessageRow = { id: string; role: string; content: string; created_at: string };
+type CoachMessageRow = {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  review_session_slug?: string | null;
+};
 
 export const Route = createFileRoute("/_authenticated/app/review")({ component: Review });
 
@@ -64,7 +83,20 @@ function formatDateLabel(ymd: string) {
   return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", weekday: "short" });
 }
 
-type SessionRow = { session_date: string; subject: string };
+/** e.g. 5月14日 化学 14:30 */
+function formatSessionSidebarLabel(sessionDate: string, subject: string, startedAtIso: string) {
+  const [y, mo, da] = sessionDate.split("-").map(Number);
+  const t = new Date(startedAtIso);
+  const time = t.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${mo}月${da}日 ${subject} ${time}`;
+}
+
+type SessionRow = {
+  session_slug: string;
+  session_date: string;
+  subject: string;
+  started_at: string;
+};
 type SidebarSessionFilter = "全部" | Subject;
 
 const SPRINT_EXAM_MAX_DAYS = 30;
@@ -80,10 +112,6 @@ type SessionCardState =
       mastered: string | null;
     }
   | { kind: "fallback" };
-
-function sessionKey(subject: string, date: string) {
-  return `${subject}::${date}`;
-}
 
 function Review() {
   const { user } = useAuth();
@@ -102,10 +130,15 @@ function Review() {
   subjectRef.current = subject;
   selectedDateRef.current = selectedDate;
 
-  const {
-    data: profileFlags,
-    isSuccess: profileFlagsReady,
-  } = useQuery({
+  const [activeSessionSlug, setActiveSessionSlug] = useState<string | null>(null);
+  const [chatRetrying, setChatRetrying] = useState(false);
+  const [deleteDialogSession, setDeleteDialogSession] = useState<SessionRow | null>(null);
+  const slugResolveGenRef = useRef(0);
+  const slugNavSourceRef = useRef<"control" | "sidebar" | "plus" | "opening">("control");
+  /** When true, the next subject-driven effect must not clear session (sidebar / session picker just set subject+date+slug). */
+  const preserveSessionFromPickerRef = useRef(false);
+
+  const { data: profileFlags, isSuccess: profileFlagsReady } = useQuery({
     queryKey: ["profile-flags", user?.id],
     enabled: !!user?.id,
     retry: false,
@@ -130,7 +163,8 @@ function Review() {
     },
   });
 
-  const onboardingIncomplete = profileFlagsReady && profileFlags?.needsGuidedReviewOnboarding === true;
+  const onboardingIncomplete =
+    profileFlagsReady && profileFlags?.needsGuidedReviewOnboarding === true;
   const { data: examRows = [] } = useQuery({
     queryKey: ["user-exams", user?.id],
     enabled: !!user?.id,
@@ -147,15 +181,15 @@ function Review() {
 
   const nearestExam = useMemo(() => pickNearestExam(examRows), [examRows]);
   const sprintMode =
-    nearestExam !== null &&
-    nearestExam.days >= 0 &&
-    nearestExam.days <= SPRINT_EXAM_MAX_DAYS;
+    nearestExam !== null && nearestExam.days >= 0 && nearestExam.days <= SPRINT_EXAM_MAX_DAYS;
 
   const chatSubject = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subject;
 
   useEffect(() => {
     if (!profileFlagsReady) return;
     if (profileFlags?.needsGuidedReviewOnboarding === true) {
+      slugResolveGenRef.current += 1;
+      setActiveSessionSlug(null);
       setSubject(ONBOARDING_REVIEW_SUBJECT);
       setSelectedDate(localYmd());
     }
@@ -163,39 +197,43 @@ function Review() {
 
   useEffect(() => {
     if (onboardingIncomplete) return;
+    if (preserveSessionFromPickerRef.current) {
+      preserveSessionFromPickerRef.current = false;
+      return;
+    }
+    slugResolveGenRef.current += 1;
+    setActiveSessionSlug(null);
     setSelectedDate(localYmd());
   }, [subject, onboardingIncomplete]);
 
   useEffect(() => {
     setSessionCard(null);
-  }, [subject, selectedDate]);
-
-  const { data: hasReviewCols } = useQuery({
-    queryKey: ["coach-review-schema"],
-    enabled: !!user?.id,
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    queryFn: () => coachMessagesHasReviewColumns(supabase),
-  });
+  }, [subject, selectedDate, activeSessionSlug]);
 
   const { data: hasAnyReviewMessages } = useQuery({
     queryKey: ["review-prior-any", user?.id],
-    enabled: !!user?.id && hasReviewCols === true,
+    enabled: !!user?.id,
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from("coach_messages")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user!.id)
-        .not("review_subject", "is", null);
-      if (error) throw error;
-      return (count ?? 0) > 0;
+      try {
+        const { count, error } = await supabase
+          .from("coach_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user!.id)
+          .not("review_subject", "is", null);
+        if (error) {
+          console.warn("[review-prior-any] count query failed", error);
+          return false;
+        }
+        return (count ?? 0) > 0;
+      } catch (e) {
+        console.warn("[review-prior-any] count query failed", e);
+        return false;
+      }
     },
   });
 
   useEffect(() => {
-    if (!user?.id || hasReviewCols !== true || hasAnyReviewMessages !== false || !profileFlagsReady)
-      return;
+    if (!user?.id || hasAnyReviewMessages !== false || !profileFlagsReady) return;
     if (openingFlightRef.current) return;
     openingFlightRef.current = true;
     let cancelled = false;
@@ -219,30 +257,40 @@ function Review() {
 
       const sub = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subjectRef.current;
       const dt = selectedDateRef.current;
-      const opening = onboardingIncomplete ? REVIEW_GUIDED_FIRST_OPENING : REVIEW_RETURNING_FIRST_OPENING;
+      slugResolveGenRef.current += 1;
+      slugNavSourceRef.current = "opening";
+      const openingSlug = crypto.randomUUID();
+      setActiveSessionSlug(openingSlug);
+      const opening = onboardingIncomplete
+        ? REVIEW_GUIDED_FIRST_OPENING
+        : REVIEW_RETURNING_FIRST_OPENING;
       const { error } = await supabase.from("coach_messages").insert({
         user_id: uid,
         role: "assistant",
         content: opening,
         review_subject: sub,
         review_session_date: dt,
+        review_session_slug: openingSlug,
       });
       openingFlightRef.current = false;
       if (cancelled || error) {
         if (error) console.error(error);
+        slugNavSourceRef.current = "control";
         return;
       }
+      slugNavSourceRef.current = "control";
+      slugResolveGenRef.current += 1;
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["review-prior-any", uid] }),
         qc.invalidateQueries({ queryKey: ["review-sessions-index", uid] }),
-        qc.invalidateQueries({ queryKey: ["review-messages", uid, sub, dt] }),
+        qc.invalidateQueries({ queryKey: ["review-messages", uid, openingSlug, sub] }),
       ]);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [user?.id, hasReviewCols, hasAnyReviewMessages, profileFlagsReady, onboardingIncomplete, qc]);
+  }, [user?.id, hasAnyReviewMessages, profileFlagsReady, onboardingIncomplete, qc]);
 
   const { data: sessionIndex = [] } = useQuery({
     queryKey: ["review-sessions-index", user?.id],
@@ -251,26 +299,37 @@ function Review() {
       try {
         const { data, error } = await supabase
           .from("coach_messages")
-          .select("review_session_date,review_subject")
+          .select("review_session_slug,review_session_date,review_subject,created_at")
           .eq("user_id", user!.id)
           .not("review_session_date", "is", null)
           .not("review_subject", "is", null)
-          .order("review_session_date", { ascending: false });
+          .not("review_session_slug", "is", null)
+          .order("created_at", { ascending: true });
         if (error) {
           console.warn("[review-sessions-index]", error);
           return [];
         }
-        const seen = new Set<string>();
-        const list: SessionRow[] = [];
+        const bySlug = new Map<
+          string,
+          { session_date: string; subject: string; started_at: string }
+        >();
         for (const row of data ?? []) {
+          const sl = row.review_session_slug;
           const d = row.review_session_date;
           const subj = row.review_subject;
-          if (!d || !subj) continue;
-          const k = `${d}::${subj}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          list.push({ session_date: d, subject: subj });
+          const ca = row.created_at;
+          if (!sl || !d || !subj || !ca) continue;
+          if (!bySlug.has(sl)) {
+            bySlug.set(sl, { session_date: d, subject: subj, started_at: ca });
+          }
         }
+        const list: SessionRow[] = [...bySlug.entries()].map(([session_slug, v]) => ({
+          session_slug,
+          session_date: v.session_date,
+          subject: v.subject,
+          started_at: v.started_at,
+        }));
+        list.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
         return list;
       } catch (e) {
         console.warn("[review-sessions-index]", e);
@@ -289,8 +348,7 @@ function Review() {
     [sessionIndex, selectedDate, chatSubject],
   );
 
-  const messagesCacheRef = useRef(new Map<string, CoachMessageRow[]>());
-  const activeSessionKey = sessionKey(chatSubject, selectedDate);
+  const activeSessionKey = activeSessionSlug ?? "__pending__";
 
   const [msgSkeletonDeadline, setMsgSkeletonDeadline] = useState(false);
   useEffect(() => {
@@ -305,43 +363,47 @@ function Review() {
     isFetching: messagesFetching,
     isFetched: messagesFetched,
   } = useQuery({
-    queryKey: ["review-messages", user?.id, chatSubject, selectedDate],
-    enabled: !!user?.id,
+    queryKey: ["review-messages", user?.id, activeSessionSlug, chatSubject],
+    enabled: !!user?.id && !!activeSessionSlug,
+    placeholderData: undefined,
     queryFn: async (): Promise<CoachMessageRow[]> => {
-      const key = sessionKey(chatSubject, selectedDate);
+      const slug = activeSessionSlug as string;
       try {
         const { data, error } = await supabase
           .from("coach_messages")
-          .select("id,role,content,created_at")
+          .select("id,role,content,created_at,review_session_slug")
           .eq("user_id", user!.id)
+          .eq("review_session_slug", slug)
           .eq("review_subject", chatSubject)
-          .eq("review_session_date", selectedDate)
           .in("role", ["user", "assistant"])
           .order("created_at", { ascending: true });
         if (error) {
           console.warn("[review-messages]", error);
-          return messagesCacheRef.current.get(key) ?? [];
+          return [];
         }
-        return (data ?? []) as CoachMessageRow[];
+        const rows = (data ?? []) as CoachMessageRow[];
+        const filtered = rows.filter(
+          (r) => r.review_session_slug === slug && (r.role === "user" || r.role === "assistant"),
+        );
+        return filtered.map(({ id, role, content, created_at, review_session_slug }) => ({
+          id,
+          role,
+          content,
+          created_at,
+          review_session_slug,
+        }));
       } catch (e) {
         console.warn("[review-messages]", e);
-        return messagesCacheRef.current.get(key) ?? [];
+        return [];
       }
     },
   });
 
-  const messageRows =
-    messageRowsRaw ?? messagesCacheRef.current.get(activeSessionKey) ?? [];
-
-  useEffect(() => {
-    if (!messagesFetched || messagesFetching) return;
-    if (messageRowsRaw !== undefined) {
-      messagesCacheRef.current.set(activeSessionKey, messageRowsRaw);
-    }
-  }, [messagesFetched, messagesFetching, messageRowsRaw, activeSessionKey]);
+  const messageRows = messageRowsRaw ?? [];
 
   const showHistorySkeleton =
     !msgSkeletonDeadline &&
+    !!activeSessionSlug &&
     (messagesPending || messagesFetching) &&
     messageRows.length === 0;
 
@@ -360,6 +422,12 @@ function Review() {
     [messageRows],
   );
 
+  const mobileSessionOptions = useMemo(() => {
+    const rows = sessionIndex.filter((s) => s.subject === chatSubject);
+    rows.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
+    return rows;
+  }, [sessionIndex, chatSubject]);
+
   const dateOptions = useMemo(() => {
     const set = new Set<string>();
     for (const s of sessionIndex) set.add(s.session_date);
@@ -368,107 +436,130 @@ function Review() {
     return [...set].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
   }, [sessionIndex, selectedDate]);
 
-  const runSilentSummary = useCallback(
-    async (historyRows: { role: string; content: string }[]) => {
-      if (!user?.id) return;
-      const key = sessionKey(chatSubject, selectedDate);
-      if (summaryDoneKeysRef.current.has(key)) return;
+  const runSilentSummary = useCallback(async () => {
+    if (!user?.id || !activeSessionSlug) return;
+    const key = activeSessionSlug;
+    if (summaryDoneKeysRef.current.has(key)) return;
 
-      const transcript = formatReviewConversationForSummary(historyRows);
-      if (!transcript.trim()) return;
+    const { data: histRows, error: histErr } = await supabase
+      .from("coach_messages")
+      .select("role,content,review_session_slug")
+      .eq("user_id", user.id)
+      .eq("review_session_slug", activeSessionSlug)
+      .eq("review_subject", chatSubject)
+      .in("role", ["user", "assistant"])
+      .order("created_at", { ascending: true });
+    if (histErr) {
+      console.warn("[review-summary] history fetch", histErr);
+      return;
+    }
+    const historyRows = (histRows ?? []).filter(
+      (r) =>
+        r.review_session_slug === activeSessionSlug &&
+        (r.role === "user" || r.role === "assistant"),
+    );
 
-      summaryDoneKeysRef.current.add(key);
+    const transcript = formatReviewConversationForSummary(historyRows);
+    if (!transcript.trim()) return;
 
-      const wasGuidedFirst = onboardingIncomplete;
+    summaryDoneKeysRef.current.add(key);
 
-      try {
+    const wasGuidedFirst = onboardingIncomplete;
+
+    try {
+      if (import.meta.env.DEV) {
         console.log("[review-summary] runSilentSummary", {
           key,
           messageCount: historyRows.length,
           transcriptChars: transcript.length,
         });
-        const parsed = await requestReviewSummaryStructured(transcript);
-        if (!parsed) throw new Error("parse");
-        const subjectLabel = parsed.subject.trim() || chatSubject;
-        const row = {
-          user_id: user.id,
-          session_date: selectedDate,
-          subject: subjectLabel,
-          weak_point: parsed.weak_point,
-          tonight_task: parsed.tonight_task,
-          follow_up: parsed.follow_up,
-          mastered: parsed.mastered,
-        };
-        const { error: insertErr } = await supabase.from("review_summaries").insert(row);
-        if (insertErr) throw insertErr;
-
-        setSessionCard({
-          kind: "full",
-          subject: subjectLabel,
-          weak_point: parsed.weak_point,
-          tonight_task: parsed.tonight_task,
-          follow_up: parsed.follow_up,
-          mastered: parsed.mastered,
-        });
-
-        const { error: profileErr } = await supabase
-          .from("profiles")
-          .update({ review_onboarding_complete: true })
-          .eq("id", user.id);
-        if (profileErr) console.error(profileErr);
-
-        const closingContent = wasGuidedFirst ? POST_FIRST_ONBOARDING_SESSION_CLOSING : POST_REVIEW_SESSION_CLOSING;
-
-        const { error: closingErr } = await supabase.from("coach_messages").insert({
-          user_id: user.id,
-          role: "assistant",
-          content: closingContent,
-          review_subject: chatSubject,
-          review_session_date: selectedDate,
-        });
-        if (closingErr) console.error(closingErr);
-
-        await Promise.all([
-          qc.invalidateQueries({ queryKey: ["review-summaries", user.id] }),
-          qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] }),
-          qc.invalidateQueries({ queryKey: ["today-tasks", user.id] }),
-          qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] }),
-          qc.invalidateQueries({ queryKey: ["today-sage-hook", user.id] }),
-          qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] }),
-          qc.invalidateQueries({ queryKey: ["review-messages", user.id, chatSubject, selectedDate] }),
-          qc.invalidateQueries({ queryKey: ["profile-flags", user.id] }),
-          qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
-        ]);
-        window.dispatchEvent(new CustomEvent("sage-weak-archive-refresh"));
-      } catch (e) {
-        summaryDoneKeysRef.current.delete(key);
-        console.error("[review-summary] runSilentSummary failed", {
-          key,
-          transcriptChars: transcript.length,
-          error: e,
-        });
-        setSessionCard({ kind: "fallback" });
       }
-    },
-    [chatSubject, selectedDate, user, qc, onboardingIncomplete],
-  );
+      const parsed = await requestReviewSummaryStructured(transcript);
+      if (!parsed) throw new Error("parse");
+      const subjectLabel = parsed.subject.trim() || chatSubject;
+      const row = {
+        user_id: user.id,
+        session_date: selectedDate,
+        subject: subjectLabel,
+        weak_point: parsed.weak_point,
+        tonight_task: parsed.tonight_task,
+        follow_up: parsed.follow_up,
+        mastered: parsed.mastered,
+        review_session_slug: activeSessionSlug,
+      };
+      const { error: insertErr } = await supabase.from("review_summaries").insert(row);
+      if (insertErr) throw insertErr;
+
+      setSessionCard({
+        kind: "full",
+        subject: subjectLabel,
+        weak_point: parsed.weak_point,
+        tonight_task: parsed.tonight_task,
+        follow_up: parsed.follow_up,
+        mastered: parsed.mastered,
+      });
+
+      const { error: profileErr } = await supabase
+        .from("profiles")
+        .update({ review_onboarding_complete: true })
+        .eq("id", user.id);
+      if (profileErr) console.error(profileErr);
+
+      const closingContent = wasGuidedFirst
+        ? POST_FIRST_ONBOARDING_SESSION_CLOSING
+        : POST_REVIEW_SESSION_CLOSING;
+
+      const { error: closingErr } = await supabase.from("coach_messages").insert({
+        user_id: user.id,
+        role: "assistant",
+        content: closingContent,
+        review_subject: chatSubject,
+        review_session_date: selectedDate,
+        review_session_slug: activeSessionSlug,
+      });
+      if (closingErr) console.error(closingErr);
+
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["review-summaries", user.id] }),
+        qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] }),
+        qc.invalidateQueries({ queryKey: ["today-tasks", user.id] }),
+        qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] }),
+        qc.invalidateQueries({ queryKey: ["today-sage-hook", user.id] }),
+        qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] }),
+        qc.invalidateQueries({
+          queryKey: ["review-messages", user.id, activeSessionSlug, chatSubject],
+        }),
+        qc.invalidateQueries({ queryKey: ["profile-flags", user.id] }),
+        qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
+      ]);
+      window.dispatchEvent(new CustomEvent("sage-weak-archive-refresh"));
+    } catch (e) {
+      summaryDoneKeysRef.current.delete(key);
+      console.error("[review-summary] runSilentSummary failed", {
+        key,
+        transcriptChars: transcript.length,
+        error: e,
+      });
+      setSessionCard({ kind: "fallback" });
+    }
+  }, [chatSubject, selectedDate, user, qc, onboardingIncomplete, activeSessionSlug]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || !user?.id || isSending) return;
 
     setIsSending(true);
-    setDraft("");
+    setChatRetrying(false);
+    let clearedDraft = false;
 
     try {
-      const extended = await coachMessagesHasReviewColumns(supabase);
-      if (!extended) {
-        toast.error(MIGRATION_HINT);
-        setStreamAssistantText(null);
-        setIsSending(false);
-        return;
+      let sessionSlug = activeSessionSlug;
+      if (!sessionSlug) {
+        sessionSlug = crypto.randomUUID();
+        slugNavSourceRef.current = "plus";
+        slugResolveGenRef.current += 1;
+        setActiveSessionSlug(sessionSlug);
       }
-      const keywordEnd = userEndsReviewSession(text);
 
       const { error: uErr } = await supabase.from("coach_messages").insert({
         user_id: user.id,
@@ -476,24 +567,31 @@ function Review() {
         content: text,
         review_subject: chatSubject,
         review_session_date: selectedDate,
+        review_session_slug: sessionSlug,
       });
       if (uErr) throw uErr;
 
+      setDraft("");
+      clearedDraft = true;
+
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, chatSubject, selectedDate] });
+      await qc.invalidateQueries({
+        queryKey: ["review-messages", user.id, sessionSlug, chatSubject],
+      });
 
       const { data: historyAfterUser, error: h0Err } = await supabase
         .from("coach_messages")
-        .select("role,content")
+        .select("role,content,review_session_slug")
         .eq("user_id", user.id)
+        .eq("review_session_slug", sessionSlug)
         .eq("review_subject", chatSubject)
-        .eq("review_session_date", selectedDate)
         .in("role", ["user", "assistant"])
         .order("created_at", { ascending: true });
       if (h0Err) throw h0Err;
-
-      const userCountAfter = (historyAfterUser ?? []).filter((m) => m.role === "user").length;
-      const shouldSummarizeAfterTurn = keywordEnd || userCountAfter >= 8;
+      const historyForApi = (historyAfterUser ?? []).filter(
+        (m) =>
+          m.review_session_slug === sessionSlug && (m.role === "user" || m.role === "assistant"),
+      );
 
       let sys =
         SAGE_DEEPSEEK_SYSTEM_PROMPT +
@@ -505,19 +603,42 @@ function Review() {
       if (sprintMode) sys += SAGE_SPRINT_MODE_SUFFIX;
       const apiMessages = [
         { role: "system" as const, content: sys },
-        ...(historyAfterUser ?? []).map((m) => ({
+        ...historyForApi.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
       ];
+      if (import.meta.env.DEV) {
+        console.log("[review-send] DeepSeek request", {
+          sessionSlug,
+          reviewSubject: chatSubject,
+          historyRows: historyForApi.length,
+          apiMessages,
+        });
+      }
 
       setStreamAssistantText("");
       let reply: string;
       try {
-        reply = await invokeDeepSeekChat(apiMessages, { max_tokens: 2000 });
+        reply = await invokeDeepSeekChat(apiMessages, {
+          max_tokens: 2000,
+          onRetrying: () => setChatRetrying(true),
+        });
       } catch (streamErr) {
         setStreamAssistantText(null);
-        throw streamErr;
+        setChatRetrying(false);
+        const net = isRetryableNetworkFailure(streamErr);
+        toast.error(
+          net
+            ? "网络不稳定，请再发一次"
+            : streamErr instanceof Error
+              ? streamErr.message
+              : "发送失败",
+        );
+        setDraft(text);
+        return;
+      } finally {
+        setChatRetrying(false);
       }
       setStreamAssistantText(null);
 
@@ -527,6 +648,7 @@ function Review() {
         content: reply,
         review_subject: chatSubject,
         review_session_date: selectedDate,
+        review_session_slug: sessionSlug,
       });
       if (aErr) throw aErr;
 
@@ -537,59 +659,46 @@ function Review() {
       }
 
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, chatSubject, selectedDate] });
-
-      const { data: fullHistory, error: h1Err } = await supabase
-        .from("coach_messages")
-        .select("role,content")
-        .eq("user_id", user.id)
-        .eq("review_subject", chatSubject)
-        .eq("review_session_date", selectedDate)
-        .in("role", ["user", "assistant"])
-        .order("created_at", { ascending: true });
-      if (h1Err) throw h1Err;
-
-      if (shouldSummarizeAfterTurn) {
-        await runSilentSummary(fullHistory ?? []);
-      }
+      await qc.invalidateQueries({
+        queryKey: ["review-messages", user.id, sessionSlug, chatSubject],
+      });
     } catch (e) {
+      if (clearedDraft && text) setDraft(text);
       const msg = e instanceof Error ? e.message : "发送失败";
       toast.error(msg);
     } finally {
       setStreamAssistantText(null);
+      setChatRetrying(false);
       setIsSending(false);
+      slugNavSourceRef.current = "control";
     }
-  }, [draft, user?.id, isSending, chatSubject, selectedDate, qc, runSilentSummary, onboardingIncomplete, sprintMode]);
+  }, [
+    draft,
+    user?.id,
+    isSending,
+    chatSubject,
+    selectedDate,
+    qc,
+    onboardingIncomplete,
+    sprintMode,
+    activeSessionSlug,
+  ]);
 
   const onEndReviewClick = useCallback(() => {
     if (userMessageCount < 3) return;
-    void runSilentSummary(messageRows.map((m) => ({ role: m.role, content: m.content })));
-  }, [userMessageCount, messageRows, runSilentSummary]);
+    void runSilentSummary();
+  }, [userMessageCount, runSilentSummary]);
 
   const startTodaySession = useCallback(async () => {
     const today = localYmd();
-    setSelectedDate(today);
     if (!user?.id) return;
     try {
-      const extended = await coachMessagesHasReviewColumns(supabase);
-      if (!extended) {
-        toast.error(MIGRATION_HINT);
-        return;
-      }
       const subj = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subject;
-      const { count, error: cErr } = await supabase
-        .from("coach_messages")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .eq("review_subject", subj)
-        .eq("review_session_date", today)
-        .in("role", ["user", "assistant"]);
-      if (cErr) console.warn("[startTodaySession] count", cErr);
-      if ((count ?? 0) > 0) {
-        await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-        await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subj, today] });
-        return;
-      }
+      const newSlug = crypto.randomUUID();
+      slugNavSourceRef.current = "plus";
+      slugResolveGenRef.current += 1;
+      setSelectedDate(today);
+      setActiveSessionSlug(newSlug);
 
       const { error: iErr } = await supabase.from("coach_messages").insert({
         user_id: user.id,
@@ -597,15 +706,59 @@ function Review() {
         content: REVIEW_SESSION_ANCHOR,
         review_subject: subj,
         review_session_date: today,
+        review_session_slug: newSlug,
       });
       if (iErr) console.warn("[startTodaySession] insert", iErr);
 
+      slugNavSourceRef.current = "control";
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, subj, today] });
+      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, newSlug, subj] });
     } catch (e) {
       console.warn("[startTodaySession]", e);
+      slugNavSourceRef.current = "control";
     }
   }, [user?.id, qc, onboardingIncomplete, subject]);
+
+  const confirmDeleteSession = useCallback(async () => {
+    const row = deleteDialogSession;
+    if (!user?.id || !row) return;
+    const slug = row.session_slug;
+    setDeleteDialogSession(null);
+    if (activeSessionSlug === slug) {
+      setActiveSessionSlug(null);
+    }
+    const prevIndex =
+      qc.getQueryData<SessionRow[]>(["review-sessions-index", user.id]) ?? sessionIndex;
+    qc.setQueryData<SessionRow[]>(
+      ["review-sessions-index", user.id],
+      prevIndex.filter((s) => s.session_slug !== slug),
+    );
+    try {
+      const { error: mErr } = await supabase
+        .from("coach_messages")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("review_session_slug", slug);
+      if (mErr) console.warn("[delete-session] messages", mErr);
+      const { error: sErr } = await supabase
+        .from("review_summaries")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("review_session_slug", slug);
+      if (sErr) console.warn("[delete-session] summaries", sErr);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] }),
+        qc.invalidateQueries({ queryKey: ["review-messages", user.id, slug, row.subject] }),
+        qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] }),
+        qc.invalidateQueries({ queryKey: ["today-tasks", user.id] }),
+        qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
+      ]);
+      window.dispatchEvent(new CustomEvent("sage-weak-archive-refresh"));
+    } catch (e) {
+      console.warn("[delete-session]", e);
+      await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
+    }
+  }, [user?.id, deleteDialogSession, qc, sessionIndex, activeSessionSlug]);
 
   const summaryBelow = sessionCard ? (
     <ReviewSummaryCard
@@ -640,15 +793,12 @@ function Review() {
         </Link>
       </header>
 
-      {hasReviewCols === false && (
-        <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>需要数据库迁移</AlertTitle>
-          <AlertDescription className="text-sm">{MIGRATION_HINT}</AlertDescription>
-        </Alert>
-      )}
-
-      <div className={cn("flex flex-col gap-4 lg:flex-row", onboardingIncomplete ? "lg:items-stretch" : "lg:items-start")}>
+      <div
+        className={cn(
+          "flex flex-col gap-4 lg:flex-row",
+          onboardingIncomplete ? "lg:items-stretch" : "lg:items-start",
+        )}
+      >
         <aside className="lg:w-56 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Sessions
@@ -672,24 +822,30 @@ function Review() {
           </div>
           <ul className="max-h-40 space-y-1 overflow-y-auto lg:max-h-[min(380px,50vh)]">
             {filteredSessionRows.map((s) => {
-              const rowActive = selectedDate === s.session_date && chatSubject === s.subject;
+              const rowActive = activeSessionSlug === s.session_slug;
               return (
-                <li key={`${s.session_date}-${s.subject}`}>
+                <li key={s.session_slug} className="flex items-stretch gap-0.5">
                   <button
                     type="button"
                     onClick={() => {
+                      preserveSessionFromPickerRef.current = true;
+                      slugNavSourceRef.current = "sidebar";
+                      slugResolveGenRef.current += 1;
                       setSubject(s.subject);
                       setSelectedDate(s.session_date);
+                      setActiveSessionSlug(s.session_slug);
                     }}
                     className={cn(
-                      "w-full rounded-lg px-2.5 py-2 text-left text-sm transition",
+                      "min-w-0 flex-1 rounded-lg px-2.5 py-2 text-left text-sm transition",
                       rowActive
                         ? "bg-primary/10 font-medium text-primary"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                   >
-                    <span className="block text-foreground">{formatDateLabel(s.session_date)}</span>
-                    <span className="flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums text-muted-foreground">
+                    <span className="block text-foreground">
+                      {formatSessionSidebarLabel(s.session_date, s.subject, s.started_at)}
+                    </span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums text-muted-foreground">
                       <span>{s.session_date}</span>
                       {sidebarSessionFilter === "全部" ? (
                         <span className="rounded border border-border bg-card px-1 py-px text-[10px] text-foreground/80">
@@ -698,6 +854,25 @@ function Review() {
                       ) : null}
                     </span>
                   </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="grid h-9 w-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                        aria-label="会话选项"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => setDeleteDialogSession(s)}
+                      >
+                        删除对话
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </li>
               );
             })}
@@ -714,7 +889,7 @@ function Review() {
             onClick={() => void startTodaySession()}
             className={cn(
               "mt-2 w-full rounded-lg border border-dashed border-border px-2.5 py-2 text-left text-sm transition hover:bg-muted",
-              selectedDate === localYmd() && "border-primary/40 bg-primary/5",
+              selectedDate === localYmd() && activeSessionSlug && "border-primary/40 bg-primary/5",
             )}
           >
             + 今天 · {localYmd()}
@@ -750,19 +925,59 @@ function Review() {
           </div>
 
           <div className="md:hidden">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">复盘日期</p>
-            <Select value={selectedDate} onValueChange={setSelectedDate}>
-              <SelectTrigger className="rounded-xl border-border bg-card">
-                <SelectValue placeholder="选择日期" />
-              </SelectTrigger>
-              <SelectContent>
-                {dateOptions.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {formatDateLabel(d)} · {d}
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              {mobileSessionOptions.length > 0 ? "复盘场次" : "复盘日期"}
+            </p>
+            {mobileSessionOptions.length > 0 ? (
+              <Select
+                value={activeSessionSlug ?? "__none__"}
+                onValueChange={(v) => {
+                  if (v === "__none__") return;
+                  const row = mobileSessionOptions.find((r) => r.session_slug === v);
+                  if (!row) return;
+                  preserveSessionFromPickerRef.current = true;
+                  slugNavSourceRef.current = "sidebar";
+                  slugResolveGenRef.current += 1;
+                  setSubject(row.subject);
+                  setSelectedDate(row.session_date);
+                  setActiveSessionSlug(row.session_slug);
+                }}
+              >
+                <SelectTrigger className="rounded-xl border-border bg-card">
+                  <SelectValue placeholder="选择场次" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__" disabled>
+                    选择场次
                   </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                  {mobileSessionOptions.map((s) => (
+                    <SelectItem key={s.session_slug} value={s.session_slug}>
+                      {formatSessionSidebarLabel(s.session_date, s.subject, s.started_at)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Select
+                value={selectedDate}
+                onValueChange={(d) => {
+                  slugResolveGenRef.current += 1;
+                  setActiveSessionSlug(null);
+                  setSelectedDate(d);
+                }}
+              >
+                <SelectTrigger className="rounded-xl border-border bg-card">
+                  <SelectValue placeholder="选择日期" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dateOptions.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {formatDateLabel(d)} · {d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {!onboardingIncomplete && !hasSessionForSelectedDate && messages.length === 0 && (
@@ -771,7 +986,7 @@ function Review() {
             </p>
           )}
 
-          <div className={cn(hasReviewCols === false && "pointer-events-none opacity-40")}>
+          <div>
             <SageChatPanel
               messages={messages}
               draft={draft}
@@ -784,21 +999,18 @@ function Review() {
                   ? "先看 Sage 的第一条消息，然后随便用你自己的话说说就好。"
                   : "说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
               }
-              placeholder={
-                hasReviewCols === false
-                  ? "请先完成上方数据库迁移"
-                  : onboardingIncomplete
-                    ? "说说你的感觉…"
-                    : `聊聊今天的「${chatSubject}」…`
-              }
+              placeholder={onboardingIncomplete ? "说说你的感觉…" : `聊聊今天的「${chatSubject}」…`}
               expand={onboardingIncomplete}
               className={cn(
-                onboardingIncomplete ? "min-h-0 flex-1 md:min-h-[380px]" : "min-h-[320px] md:min-h-[420px]",
+                onboardingIncomplete
+                  ? "min-h-0 flex-1 md:min-h-[380px]"
+                  : "min-h-[320px] md:min-h-[420px]",
               )}
               showHistorySkeleton={showHistorySkeleton}
               streamingAssistantText={streamAssistantText}
+              composerHint={chatRetrying ? "重试中..." : null}
               betweenScrollAndInput={
-                hasReviewCols === true && userMessageCount >= 3 ? (
+                userMessageCount >= 3 ? (
                   <Button
                     type="button"
                     variant="outline"
@@ -815,6 +1027,27 @@ function Review() {
           </div>
         </div>
       </div>
+
+      <AlertDialog
+        open={deleteDialogSession !== null}
+        onOpenChange={(o) => !o && setDeleteDialogSession(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除复盘记录</AlertDialogTitle>
+            <AlertDialogDescription>确定删除这条复盘记录吗？</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => void confirmDeleteSession()}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

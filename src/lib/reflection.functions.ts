@@ -13,7 +13,9 @@ export const submitReflection = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const qs = REFLECTION_QUESTIONS[data.subject];
-    const formatted = qs.map((q) => `Q: ${q.label}\nA: ${(data.answers[q.id] ?? "").trim() || "（没写）"}`).join("\n\n");
+    const formatted = qs
+      .map((q) => `Q: ${q.label}\nA: ${(data.answers[q.id] ?? "").trim() || "（没写）"}`)
+      .join("\n\n");
 
     const sys = `${SAGE_PERSONA}
 
@@ -46,7 +48,7 @@ export const submitReflection = createServerFn({ method: "POST" })
     });
     if (!res.ok) {
       const txt = await res.text();
-      console.error("reflection err", res.status, txt);
+      console.error("reflection err", { status: res.status, bodyChars: txt.length });
       if (res.status === 429) throw new Error("AI 太忙，等 30 秒。");
       if (res.status === 402) throw new Error("AI 额度用完了。");
       throw new Error("AI 暂时连不上。");
@@ -54,12 +56,16 @@ export const submitReflection = createServerFn({ method: "POST" })
     const json = await res.json();
     const diagnosis: string = json.choices?.[0]?.message?.content ?? "";
 
-    const { data: row, error } = await supabase.from("reflections").insert({
-      user_id: userId,
-      subject: data.subject,
-      answers: data.answers,
-      ai_diagnosis: diagnosis,
-    }).select("id").single();
+    const { data: row, error } = await supabase
+      .from("reflections")
+      .insert({
+        user_id: userId,
+        subject: data.subject,
+        answers: data.answers,
+        ai_diagnosis: diagnosis,
+      })
+      .select("id")
+      .single();
     if (error) throw new Error(error.message);
 
     return { id: row.id, diagnosis };
@@ -69,6 +75,11 @@ export const listReflections = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
-    const { data } = await supabase.from("reflections").select("id,subject,ai_diagnosis,created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(20);
+    const { data } = await supabase
+      .from("reflections")
+      .select("id,subject,ai_diagnosis,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(20);
     return { items: data ?? [] };
   });
