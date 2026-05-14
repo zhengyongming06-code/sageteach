@@ -56,27 +56,14 @@ export async function persistTaskCompletion(
   completed: boolean,
 ): Promise<{ error: { message: string } | null }> {
   const updated_at = new Date().toISOString();
-  const { data: existing, error: selErr } = await supabase
-    .from("task_completions")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("review_summary_id", reviewSummaryId)
-    .maybeSingle();
-  if (selErr) return { error: selErr };
-
-  if (existing?.id) {
-    const { error } = await supabase
-      .from("task_completions")
-      .update({ completed, updated_at })
-      .eq("id", existing.id);
-    return { error };
-  }
-
-  const { error } = await supabase.from("task_completions").insert({
-    user_id: userId,
-    review_summary_id: reviewSummaryId,
-    completed,
-    updated_at,
-  });
+  const { error } = await supabase.from("task_completions").upsert(
+    {
+      user_id: userId,
+      review_summary_id: reviewSummaryId,
+      completed,
+      updated_at,
+    },
+    { onConflict: "user_id,review_summary_id" },
+  );
   return { error };
 }

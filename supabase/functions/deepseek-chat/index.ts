@@ -73,7 +73,8 @@ Deno.serve(async (req) => {
 
   const apiKey = Deno.env.get("DEEPSEEK_API_KEY")?.trim();
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: { message: "DEEPSEEK_API_KEY not configured on server" } }), {
+    console.error("[deepseek-chat] DEEPSEEK_API_KEY missing");
+    return new Response(JSON.stringify({ error: { message: "服务暂时不可用" } }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -103,25 +104,40 @@ Deno.serve(async (req) => {
     try {
       data = JSON.parse(rawText) as unknown;
     } catch {
-      return new Response(
-        JSON.stringify({ error: { message: rawText.slice(0, 500) || "Invalid upstream response" } }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+      console.error("[deepseek-chat] upstream non-JSON", {
+        status: response.status,
+        length: rawText.length,
+        snippet: rawText.slice(0, 800),
+      });
+      return new Response(JSON.stringify({ error: { message: "上游返回无效，请稍后重试" } }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!response.ok) {
+      console.error("[deepseek-chat] DeepSeek HTTP error", { status: response.status, body: data });
+      const clientStatus = response.status === 429 ? 429 : response.status >= 500 ? 502 : 400;
+      return new Response(JSON.stringify({ error: { message: "AI 服务暂时不可用，请稍后重试" } }), {
+        status: clientStatus,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     return new Response(JSON.stringify(data), {
-      status: response.ok ? 200 : response.status,
+      status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    const msg = e instanceof Error && e.name === "AbortError" ? "Upstream timeout" : String(e);
-    return new Response(JSON.stringify({ error: { message: msg } }), {
-      status: 504,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const isAbort = e instanceof Error && e.name === "AbortError";
+    console.error("[deepseek-chat] fetch failed", { isAbort, err: e });
+    return new Response(
+      JSON.stringify({ error: { message: isAbort ? "请求超时" : "服务暂时不可用" } }),
+      {
+        status: 504,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
   } finally {
     clearTimeout(timer);
   }

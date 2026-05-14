@@ -20,13 +20,16 @@ function AppShell() {
 
   useEffect(() => {
     if (!user) return;
-    supabase
+    void supabase
       .from("profiles")
       .select("onboarded")
       .eq("id", user.id)
       .maybeSingle()
       .then(({ data }) => {
         if (data && !data.onboarded) nav({ to: "/onboarding" });
+      })
+      .catch((err) => {
+        console.warn("[app-shell] profile onboarded check failed", err);
       });
   }, [user, nav]);
 

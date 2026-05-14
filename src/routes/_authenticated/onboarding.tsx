@@ -27,9 +27,17 @@ function Onboarding() {
 
   useEffect(() => {
     if (!user) return;
-    supabase.from("profiles").select("onboarded").eq("id", user.id).maybeSingle().then(({ data }) => {
-      if (data?.onboarded) nav({ to: "/app/today" });
-    });
+    void supabase
+      .from("profiles")
+      .select("onboarded")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.onboarded) nav({ to: "/app/today" });
+      })
+      .catch((err) => {
+        console.warn("[onboarding] profile onboarded check failed", err);
+      });
   }, [user, nav]);
 
   const next = () => setStep((s) => s + 1);
@@ -44,27 +52,43 @@ function Onboarding() {
     }
     setSaving(true);
     try {
-      const { error: e1 } = await supabase
+      const parseScore = (label: string, raw: string) => {
+        const t = raw.trim();
+        if (!t) throw new Error(`请填写${label}`);
+        const n = Number(t);
+        if (!Number.isFinite(n)) throw new Error(`${label}须为有效数字`);
+        return n;
+      };
+      const currentScore = parseScore("当前分", current);
+      const targetScore = parseScore("目标分", target);
+
+      const { data: examRow, error: eExam } = await supabase
+        .from("user_exams")
+        .insert({
+          user_id: user.id,
+          name,
+          exam_date: examDate,
+        })
+        .select("id")
+        .single();
+      if (eExam) throw eExam;
+
+      const { error: eProfile } = await supabase
         .from("profiles")
         .update({
           grade,
-          current_score: current ? Number(current) : null,
-          target_score: target ? Number(target) : null,
+          current_score: currentScore,
+          target_score: targetScore,
           exam_name: name,
           exam_date: examDate,
           onboarded: true,
         })
         .eq("id", user.id);
-      if (e1) throw e1;
-
-      const { error: e2 } = await supabase.from("user_exams").insert({
-        user_id: user.id,
-        name,
-        exam_date: examDate,
-      });
-      if (e2) {
-        console.warn("[onboarding] user_exams insert", e2);
+      if (eProfile) {
+        await supabase.from("user_exams").delete().eq("id", examRow.id);
+        throw eProfile;
       }
+
       await syncProfileNearestExam(user.id);
       nav({ to: "/app/today" });
     } catch (e) {
@@ -95,7 +119,9 @@ function Onboarding() {
                 next();
               }}
               className={`rounded-2xl border px-4 py-4 text-base transition ${
-                grade === g ? "border-primary bg-primary/10" : "border-border bg-card hover:border-primary/40"
+                grade === g
+                  ? "border-primary bg-primary/10"
+                  : "border-border bg-card hover:border-primary/40"
               }`}
             >
               {g}
@@ -120,9 +146,16 @@ function Onboarding() {
           </div>
           <div>
             <p className="mb-2 text-sm text-muted-foreground">考试日期</p>
-            <Input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="h-12 rounded-2xl text-base" />
+            <Input
+              type="date"
+              value={examDate}
+              onChange={(e) => setExamDate(e.target.value)}
+              className="h-12 rounded-2xl text-base"
+            />
             {grade === "高三" ? (
-              <p className="mt-2 text-xs text-muted-foreground">高三默认「高考」与 2026-06-07，可随时修改。</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                高三默认「高考」与 2026-06-07，可随时修改。
+              </p>
             ) : null}
           </div>
         </div>
@@ -168,7 +201,10 @@ function Onboarding() {
     <div className="mx-auto flex min-h-screen max-w-md flex-col px-6 py-10">
       <div className="mb-8 flex gap-1.5">
         {steps.map((_, i) => (
-          <div key={i} className={`h-1 flex-1 rounded-full transition ${i <= step ? "bg-primary" : "bg-border"}`} />
+          <div
+            key={i}
+            className={`h-1 flex-1 rounded-full transition ${i <= step ? "bg-primary" : "bg-border"}`}
+          />
         ))}
       </div>
 
@@ -191,7 +227,11 @@ function Onboarding() {
           上一步
         </Button>
         {last ? (
-          <Button onClick={() => void save()} disabled={!cur.can || saving} className="h-12 rounded-xl px-6">
+          <Button
+            onClick={() => void save()}
+            disabled={!cur.can || saving}
+            className="h-12 rounded-xl px-6"
+          >
             {saving ? "保存中…" : "完成"}
           </Button>
         ) : (
