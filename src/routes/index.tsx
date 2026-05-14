@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { motion } from "framer-motion";
 import { ArrowRight, Brain, Compass, HeartPulse, LineChart } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
@@ -38,12 +37,7 @@ function Landing() {
       </header>
 
       <main className="mx-auto max-w-5xl px-6 pb-24 pt-10 sm:pt-20">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="max-w-3xl"
-        >
+        <div className="max-w-3xl">
           <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-6xl">
             Sage 一个帮你复盘提分的 AI
           </h1>
@@ -63,21 +57,18 @@ function Landing() {
               已有账号 →
             </Link>
           </div>
-        </motion.div>
+        </div>
 
         <section className="mt-20 grid gap-4 sm:grid-cols-2">
-          {features.map((f, i) => (
-            <motion.div
+          {features.map((f) => (
+            <div
               key={f.title}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.1 + i * 0.06 }}
               className="rounded-3xl border border-border bg-card p-6 shadow-sm"
             >
               <f.icon className="h-5 w-5 text-primary" />
               <h3 className="mt-4 text-lg font-semibold">{f.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{f.desc}</p>
-            </motion.div>
+            </div>
           ))}
         </section>
 

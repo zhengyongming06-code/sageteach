@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Outlet,
@@ -90,13 +91,21 @@ function RootShell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Sonner touches `document` / portals; mount only on client to avoid SSR/hydration glitches on Workers. */
+function ClientToaster() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return <Toaster position="top-center" />;
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <Outlet />
-        <Toaster position="top-center" />
+        <ClientToaster />
       </AuthProvider>
     </QueryClientProvider>
   );

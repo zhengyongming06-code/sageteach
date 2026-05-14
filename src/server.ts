@@ -7,6 +7,24 @@ type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
 
+/** Cloudflare Workers static assets binding (see wrangler.json `assets.binding`). */
+type CfWorkerEnv = {
+  ASSETS?: { fetch(input: Request | string, init?: RequestInit): Promise<Response> };
+};
+
+/**
+ * Serve hashed client bundles from `dist/client` before TanStack SSR.
+ * Fixes 404 when the framework does not delegate `/assets/*` to the ASSETS binding.
+ */
+async function tryServeStaticAssets(request: Request, env: CfWorkerEnv): Promise<Response | null> {
+  const { ASSETS } = env;
+  if (!ASSETS) return null;
+  const { pathname } = new URL(request.url);
+  if (!pathname.startsWith("/assets/") && !pathname.startsWith("/_assets/")) return null;
+  const res = await ASSETS.fetch(request);
+  return res.status === 404 ? null : res;
+}
+
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 
 async function getServerEntry(): Promise<ServerEntry> {
@@ -69,6 +87,9 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const staticRes = await tryServeStaticAssets(request, env as CfWorkerEnv);
+      if (staticRes) return staticRes;
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);
