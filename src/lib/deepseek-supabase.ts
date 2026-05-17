@@ -37,7 +37,73 @@ export function isRetryableNetworkFailure(e: unknown): boolean {
   );
 }
 
-/** Direct DeepSeek API from the browser (temporary; move behind Edge Function later). */
+function parseSseDelta(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("data:")) return null;
+  const data = trimmed.slice(5).trim();
+  if (!data || data === "[DONE]") return null;
+  try {
+    const json = JSON.parse(data) as {
+      choices?: Array<{ delta?: { content?: string | null } }>;
+    };
+    const piece = json.choices?.[0]?.delta?.content;
+    return typeof piece === "string" && piece.length > 0 ? piece : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read OpenAI-compatible SSE stream from DeepSeek and call onDelta for each token chunk. */
+async function readDeepSeekSseStream(
+  body: ReadableStream<Uint8Array>,
+  onDelta: (textSoFar: string, delta: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulated = "";
+
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const delta = parseSseDelta(line);
+        if (delta) {
+          accumulated += delta;
+          onDelta(accumulated, delta);
+        }
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      for (const line of buffer.split("\n")) {
+        const delta = parseSseDelta(line);
+        if (delta) {
+          accumulated += delta;
+          onDelta(accumulated, delta);
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const text = accumulated.trim();
+  if (!text) {
+    throw new Error("AI 没有返回内容，再试一次。");
+  }
+  return text;
+}
+
+/** Direct DeepSeek API (non-streaming) — summaries / daily questions. */
 async function invokeDeepSeekDirect(
   messages: DeepSeekMessage[],
   max_tokens: number,
@@ -90,62 +156,160 @@ async function invokeDeepSeekDirect(
   throw new Error("AI 没有返回内容，再试一次。");
 }
 
+/** Streaming DeepSeek chat — SSE token deltas via onDelta. */
+async function invokeDeepSeekDirectStream(
+  messages: DeepSeekMessage[],
+  max_tokens: number,
+  onDelta: (textSoFar: string, delta: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("Missing VITE_DEEPSEEK_API_KEY");
+  }
+
+  const { messages: safeMessages, max_tokens: safeMax } = assertValidDeepSeekProxyPayload({
+    messages,
+    max_tokens,
+  });
+
+  const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify({
+      model: "deepseek-chat",
+      messages: safeMessages,
+      max_tokens: safeMax,
+      stream: true,
+    }),
+  });
+
+  if (!res.ok) {
+    const raw = await res.text();
+    logUpstreamResponse("deepseek-stream", res.status, raw);
+    throw new Error(`AI 服务暂时不可用（${res.status}）`);
+  }
+
+  if (!res.body) {
+    throw new Error("AI 流式响应不可用（无 body）");
+  }
+
+  return readDeepSeekSseStream(res.body, onDelta, signal);
+}
+
 async function invokeOnce(
   messages: DeepSeekMessage[],
   max_tokens: number,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  onDelta: ((textSoFar: string, delta: string) => void) | undefined,
 ): Promise<string> {
+  if (onDelta) {
+    return invokeDeepSeekDirectStream(messages, max_tokens, onDelta, signal);
+  }
   return invokeDeepSeekDirect(messages, max_tokens, signal);
 }
 
+function mergeAbortSignals(
+  userSignal: AbortSignal | undefined,
+  timeoutMs: number | undefined,
+): { signal: AbortSignal; timedOut: () => boolean; cleanup: () => void } {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  if (userSignal) {
+    if (userSignal.aborted) controller.abort();
+    else userSignal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  if (timeoutMs != null && timeoutMs > 0) {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    cleanup: () => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    },
+  };
+}
+
+export type InvokeDeepSeekChatOptions = {
+  max_tokens?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  onRetrying?: () => void;
+  /** Enables `stream: true` and incremental UI updates. */
+  onDelta?: (textSoFar: string, delta: string) => void;
+};
+
 /**
  * DeepSeek chat completions (browser → api.deepseek.com).
- * TODO: proxy via Supabase Edge Function for production key safety.
+ * Pass `onDelta` for ChatGPT-style streaming; omit for one-shot responses.
  */
 export async function invokeDeepSeekChat(
   messages: DeepSeekMessage[],
-  options?: {
-    max_tokens?: number;
-    timeoutMs?: number;
-    signal?: AbortSignal;
-    onRetrying?: () => void;
-  },
+  options?: InvokeDeepSeekChatOptions,
 ): Promise<string> {
   const max_tokens = options?.max_tokens ?? 1000;
   const timeoutMs = options?.timeoutMs;
   const maxAttempts = 3;
-
-  const runSingleAttempt = async (): Promise<string> => {
-    if (timeoutMs != null && timeoutMs > 0) {
-      let tid: ReturnType<typeof setTimeout> | undefined;
-      const timeoutP = new Promise<never>((_, rej) => {
-        tid = setTimeout(() => rej(new DeepSeekTimeoutError()), timeoutMs);
-      });
-      try {
-        return await Promise.race([invokeOnce(messages, max_tokens, options?.signal), timeoutP]);
-      } finally {
-        if (tid !== undefined) clearTimeout(tid);
-      }
-    }
-    return await invokeOnce(messages, max_tokens, options?.signal);
-  };
+  const onDelta = options?.onDelta;
 
   if (import.meta.env.DEV) {
-    console.log("[deepseek] outgoing messages (full payload to API)", messages);
+    console.log("[deepseek] outgoing messages", {
+      streaming: !!onDelta,
+      messageCount: messages.length,
+      max_tokens,
+    });
   } else {
-    console.log("[deepseek] request", { messageCount: messages.length, max_tokens });
+    console.log("[deepseek] request", {
+      streaming: !!onDelta,
+      messageCount: messages.length,
+      max_tokens,
+    });
   }
 
   let lastErr: unknown;
+  let receivedAnyToken = false;
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const { signal, timedOut, cleanup } = mergeAbortSignals(options?.signal, timeoutMs);
     try {
-      return await runSingleAttempt();
+      const deltaCb = onDelta
+        ? (full: string, delta: string) => {
+            receivedAnyToken = true;
+            onDelta(full, delta);
+          }
+        : undefined;
+
+      const text = await invokeOnce(messages, max_tokens, signal, deltaCb);
+      return text;
     } catch (e) {
-      lastErr = e;
-      const canRetry = attempt < maxAttempts && isRetryableNetworkFailure(e);
-      if (!canRetry) throw e;
+      if (timedOut()) {
+        lastErr = new DeepSeekTimeoutError();
+      } else {
+        lastErr = e;
+      }
+      const canRetry =
+        attempt < maxAttempts &&
+        isRetryableNetworkFailure(lastErr) &&
+        (!onDelta || !receivedAnyToken);
+      if (!canRetry) throw lastErr;
+      receivedAnyToken = false;
       options?.onRetrying?.();
       await sleep(1000);
+    } finally {
+      cleanup();
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));

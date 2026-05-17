@@ -3,29 +3,49 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
 /** Direct Supabase (local dev). */
-const SUPABASE_DIRECT_URL = "https://lqffeyniustvyegcigyy.supabase.co";
-/** Cloudflare-proxied Supabase (production — db.sageteach.top → project host). */
+const SUPABASE_DIRECT_URL =
+  import.meta.env.VITE_SUPABASE_URL?.trim().replace(/\/$/, "") ||
+  (import.meta.env.VITE_SUPABASE_PROJECT_ID
+    ? `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co`
+    : "");
+
+/** Cloudflare-proxied Supabase (production). */
 const SUPABASE_PROXY_URL = "https://db.sageteach.top";
 
-const supabaseUrl = import.meta.env.PROD ? SUPABASE_PROXY_URL : SUPABASE_DIRECT_URL;
+const supabaseUrl = import.meta.env.PROD
+  ? SUPABASE_PROXY_URL
+  : SUPABASE_DIRECT_URL || SUPABASE_PROXY_URL;
 
-const supabaseKey =
-  import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ||
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim();
+// PostgREST uses anon JWT + user's Authorization Bearer from auth.getSession().
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
+if (!supabaseUrl) {
+  throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_PROJECT_ID");
+}
 if (!supabaseKey) {
-  const message =
-    "Missing VITE_SUPABASE_ANON_KEY or VITE_SUPABASE_PUBLISHABLE_KEY.";
+  const message = "Missing VITE_SUPABASE_ANON_KEY (anon JWT required).";
   console.error(`[Supabase] ${message}`);
   throw new Error(message);
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    storageKey: "sage-auth",
-    storage: typeof window !== "undefined" ? window.localStorage : undefined,
-    detectSessionInUrl: true,
+function createSupabaseClient() {
+  return createClient<Database>(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      storageKey: "sage-auth",
+      storage: typeof window !== "undefined" ? window.localStorage : undefined,
+      detectSessionInUrl: true,
+    },
+  });
+}
+
+let _supabase: ReturnType<typeof createSupabaseClient> | undefined;
+
+/** Single shared client — all routes & review summary writes must use this instance. */
+export const supabase = new Proxy({} as ReturnType<typeof createSupabaseClient>, {
+  get(_, prop, receiver) {
+    if (!_supabase) _supabase = createSupabaseClient();
+    return Reflect.get(_supabase, prop, receiver);
   },
 });

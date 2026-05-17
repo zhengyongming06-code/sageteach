@@ -56,6 +56,9 @@ import {
   formatReviewConversationForSummary,
   requestReviewSummaryStructured,
 } from "@/lib/review-summary";
+import { buildReviewSummaryInsertRow, persistReviewSummary } from "@/lib/review-summary-db";
+import { logSupabaseError } from "@/lib/supabase-errors";
+import type { PostgrestError } from "@supabase/supabase-js";
 
 /** Invisible thread anchor: listed in session index, excluded from chat (role system). */
 const REVIEW_SESSION_ANCHOR = "__review_session_anchor_v1__";
@@ -476,18 +479,14 @@ function Review() {
       const parsed = await requestReviewSummaryStructured(transcript);
       if (!parsed) throw new Error("parse");
       const subjectLabel = parsed.subject.trim() || chatSubject;
-      const row = {
-        user_id: user.id,
-        session_date: selectedDate,
+      const row = buildReviewSummaryInsertRow({
+        userId: user.id,
+        sessionDate: selectedDate,
         subject: subjectLabel,
-        weak_point: parsed.weak_point,
-        tonight_task: parsed.tonight_task,
-        follow_up: parsed.follow_up,
-        mastered: parsed.mastered,
-        review_session_slug: activeSessionSlug,
-      };
-      const { error: insertErr } = await supabase.from("review_summaries").insert(row);
-      if (insertErr) throw insertErr;
+        parsed,
+        reviewSessionSlug: activeSessionSlug,
+      });
+      await persistReviewSummary(row, supabase);
 
       setSessionCard({
         kind: "full",
@@ -534,11 +533,20 @@ function Review() {
       window.dispatchEvent(new CustomEvent("sage-weak-archive-refresh"));
     } catch (e) {
       summaryDoneKeysRef.current.delete(key);
-      console.error("[review-summary] runSilentSummary failed", {
-        key,
-        transcriptChars: transcript.length,
-        error: e,
-      });
+      const pg = e as PostgrestError;
+      if (pg?.code && pg?.message) {
+        logSupabaseError("review-summary runSilentSummary", pg, {
+          key,
+          transcriptChars: transcript.length,
+        });
+      } else {
+        console.error("[review-summary] runSilentSummary failed", {
+          key,
+          transcriptChars: transcript.length,
+          message: e instanceof Error ? e.message : String(e),
+          error: e,
+        });
+      }
     }
   }, [chatSubject, selectedDate, user, qc, onboardingIncomplete, activeSessionSlug]);
 
@@ -616,13 +624,29 @@ function Review() {
       }
 
       setStreamAssistantText("");
+      let streamRaf = 0;
+      let pendingStream = "";
+      const flushStreamToUi = () => {
+        streamRaf = 0;
+        setStreamAssistantText(pendingStream);
+      };
+
       let reply: string;
       try {
         reply = await invokeDeepSeekChat(apiMessages, {
           max_tokens: 2000,
           onRetrying: () => setChatRetrying(true),
+          onDelta: (full) => {
+            pendingStream = full;
+            if (!streamRaf) {
+              streamRaf = requestAnimationFrame(flushStreamToUi);
+            }
+          },
         });
+        if (streamRaf) cancelAnimationFrame(streamRaf);
+        setStreamAssistantText(reply);
       } catch (streamErr) {
+        if (streamRaf) cancelAnimationFrame(streamRaf);
         setStreamAssistantText(null);
         setChatRetrying(false);
         const net = isRetryableNetworkFailure(streamErr);
@@ -638,7 +662,6 @@ function Review() {
       } finally {
         setChatRetrying(false);
       }
-      setStreamAssistantText(null);
 
       const { error: aErr } = await supabase.from("coach_messages").insert({
         user_id: user.id,
@@ -660,6 +683,7 @@ function Review() {
       await qc.invalidateQueries({
         queryKey: ["review-messages", user.id, sessionSlug, chatSubject],
       });
+      setStreamAssistantText(null);
     } catch (e) {
       if (clearedDraft && text) setDraft(text);
       const msg = e instanceof Error ? e.message : "发送失败";
@@ -1006,7 +1030,9 @@ function Review() {
               )}
               showHistorySkeleton={showHistorySkeleton}
               streamingAssistantText={streamAssistantText}
-              composerHint={chatRetrying ? "重试中..." : null}
+              composerHint={
+                chatRetrying ? "重试中…" : isSending ? "Sage 正在输入…" : null
+              }
               betweenScrollAndInput={
                 userMessageCount >= 3 ? (
                   <Button

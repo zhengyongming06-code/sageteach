@@ -164,7 +164,7 @@ export function SageChatPanel({
                   </ReactMarkdown>
                 ) : null}
                 <span
-                  className="ml-0.5 inline-block animate-pulse select-none font-mono text-primary"
+                  className="ml-0.5 inline-block animate-[sage-cursor_1s_steps(2)_infinite] select-none font-mono text-primary"
                   aria-hidden
                 >
                   ▋
