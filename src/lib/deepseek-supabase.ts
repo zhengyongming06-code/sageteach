@@ -1,4 +1,3 @@
-import { getBearerAuthHeaders } from "./server-fn-auth";
 import { assertValidDeepSeekProxyPayload } from "./deepseek-proxy-validation";
 import type { DeepSeekMessage } from "./deepseek-types";
 
@@ -38,37 +37,35 @@ export function isRetryableNetworkFailure(e: unknown): boolean {
   );
 }
 
-/**
- * Calls Supabase Edge Function `deepseek-chat` from the browser (session Bearer + anon apikey).
- */
-async function invokeEdgeDeepSeek(
+/** Direct DeepSeek API from the browser (temporary; move behind Edge Function later). */
+async function invokeDeepSeekDirect(
   messages: DeepSeekMessage[],
   max_tokens: number,
   signal?: AbortSignal,
 ): Promise<string> {
-  const base = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "");
-  const anon =
-    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ??
-    import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
-  if (!base || !anon) {
-    throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY");
+  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("Missing VITE_DEEPSEEK_API_KEY");
   }
 
-  const authHeaders = await getBearerAuthHeaders();
   const { messages: safeMessages, max_tokens: safeMax } = assertValidDeepSeekProxyPayload({
     messages,
     max_tokens,
   });
 
-  const res = await fetch(`${base}/functions/v1/deepseek-chat`, {
+  const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
     method: "POST",
     signal,
     headers: {
       "Content-Type": "application/json",
-      Authorization: authHeaders.Authorization,
-      apikey: anon,
+      Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ messages: safeMessages, max_tokens: safeMax }),
+    body: JSON.stringify({
+      model: "deepseek-chat",
+      messages: safeMessages,
+      max_tokens: safeMax,
+      stream: false,
+    }),
   });
 
   const raw = await res.text();
@@ -76,12 +73,12 @@ async function invokeEdgeDeepSeek(
   try {
     json = JSON.parse(raw) as unknown;
   } catch {
-    logUpstreamResponse("deepseek-edge-fn", res.status, raw);
+    logUpstreamResponse("deepseek-direct", res.status, raw);
     throw new Error("AI 服务返回格式异常，请稍后重试。");
   }
 
   if (!res.ok) {
-    logUpstreamResponse("deepseek-edge-fn", res.status, raw);
+    logUpstreamResponse("deepseek-direct", res.status, raw);
     throw new Error(`AI 服务暂时不可用（${res.status}）`);
   }
 
@@ -89,7 +86,7 @@ async function invokeEdgeDeepSeek(
   const text = choices?.[0]?.message?.content?.trim();
   if (text) return text;
 
-  console.error("[deepseek-edge-fn] empty choices", { status: res.status });
+  console.error("[deepseek-direct] empty choices", { status: res.status });
   throw new Error("AI 没有返回内容，再试一次。");
 }
 
@@ -98,11 +95,12 @@ async function invokeOnce(
   max_tokens: number,
   signal?: AbortSignal,
 ): Promise<string> {
-  return invokeEdgeDeepSeek(messages, max_tokens, signal);
+  return invokeDeepSeekDirect(messages, max_tokens, signal);
 }
 
 /**
- * DeepSeek via Supabase Edge Function `deepseek-chat` (browser; requires logged-in session).
+ * DeepSeek chat completions (browser → api.deepseek.com).
+ * TODO: proxy via Supabase Edge Function for production key safety.
  */
 export async function invokeDeepSeekChat(
   messages: DeepSeekMessage[],

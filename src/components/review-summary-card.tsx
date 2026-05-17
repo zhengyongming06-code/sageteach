@@ -1,7 +1,6 @@
 import { cn } from "@/lib/utils";
 
 export type ReviewSummaryCardProps = {
-  variant: "full" | "fallback";
   subject?: string;
   weakPoint?: string;
   tonightTask?: string;
@@ -11,7 +10,6 @@ export type ReviewSummaryCardProps = {
 };
 
 export function ReviewSummaryCard({
-  variant,
   subject,
   weakPoint,
   tonightTask,
@@ -19,20 +17,6 @@ export function ReviewSummaryCard({
   mastered,
   className,
 }: ReviewSummaryCardProps) {
-  if (variant === "fallback") {
-    return (
-      <div
-        className={cn(
-          "rounded-2xl border border-neutral-200 bg-[#FFFFFF] px-4 py-3 text-sm text-foreground shadow-sm",
-          "dark:border-border dark:bg-card",
-          className,
-        )}
-      >
-        <p className="font-medium">复盘完成 ✓ 今天认真了。明天继续。</p>
-      </div>
-    );
-  }
-
   return (
     <div
       className={cn(

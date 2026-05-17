@@ -110,8 +110,7 @@ type SessionCardState =
       tonight_task: string;
       follow_up: string;
       mastered: string | null;
-    }
-  | { kind: "fallback" };
+    };
 
 function Review() {
   const { user } = useAuth();
@@ -540,7 +539,6 @@ function Review() {
         transcriptChars: transcript.length,
         error: e,
       });
-      setSessionCard({ kind: "fallback" });
     }
   }, [chatSubject, selectedDate, user, qc, onboardingIncomplete, activeSessionSlug]);
 
@@ -760,16 +758,16 @@ function Review() {
     }
   }, [user?.id, deleteDialogSession, qc, sessionIndex, activeSessionSlug]);
 
-  const summaryBelow = sessionCard ? (
-    <ReviewSummaryCard
-      variant={sessionCard.kind === "fallback" ? "fallback" : "full"}
-      subject={sessionCard.kind === "full" ? sessionCard.subject : undefined}
-      weakPoint={sessionCard.kind === "full" ? sessionCard.weak_point : undefined}
-      tonightTask={sessionCard.kind === "full" ? sessionCard.tonight_task : undefined}
-      followUp={sessionCard.kind === "full" ? sessionCard.follow_up : undefined}
-      mastered={sessionCard.kind === "full" ? sessionCard.mastered : undefined}
-    />
-  ) : null;
+  const summaryBelow =
+    sessionCard?.kind === "full" ? (
+      <ReviewSummaryCard
+        subject={sessionCard.subject}
+        weakPoint={sessionCard.weak_point}
+        tonightTask={sessionCard.tonight_task}
+        followUp={sessionCard.follow_up}
+        mastered={sessionCard.mastered}
+      />
+    ) : null;
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname === "/app/review/archive") {
