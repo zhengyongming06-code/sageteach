@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Send } from "lucide-react";
@@ -51,6 +51,7 @@ type SageChatPanelProps = {
   emptyHint: string;
   placeholder?: string;
   className?: string;
+  style?: CSSProperties;
   /** Fill parent flex column (scroll area grows, min-h-0). */
   expand?: boolean;
   /** Rendered between the message list and the composer (e.g. actions). */
@@ -75,6 +76,7 @@ export function SageChatPanel({
   emptyHint,
   placeholder = "输入消息…",
   className = "",
+  style,
   expand = false,
   betweenScrollAndInput,
   belowForm,
@@ -140,6 +142,7 @@ export function SageChatPanel({
         expand && "h-full min-h-0",
         className,
       )}
+      style={style}
     >
       <div
         ref={scrollRef}

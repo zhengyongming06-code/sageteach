@@ -963,7 +963,7 @@ function Review() {
           "lg:flex-row lg:items-stretch",
         )}
       >
-        <aside className="lg:w-56 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
+        <aside className="hidden shrink-0 border-border lg:block lg:w-56 lg:border-r lg:pr-5">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Sessions
           </p>
@@ -1141,8 +1141,10 @@ function Review() {
           )}
           </div>
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <SageChatPanel
+          <div
+            className="flex min-h-0 min-w-0 flex-1 flex-col max-lg:h-[calc(100dvh-200px)] max-lg:min-h-[400px] lg:h-full lg:min-h-0"
+          >
+            <SageChatPanel
               messages={messages}
               draft={draft}
               onDraftChange={setDraft}
@@ -1157,6 +1159,7 @@ function Review() {
               placeholder={onboardingIncomplete ? "说说你的感觉…" : `聊聊今天的「${chatSubject}」…`}
               expand
               className="min-h-0 flex-1"
+              style={{ flex: 1, height: "100%" }}
               showHistorySkeleton={showHistorySkeleton}
               streamingAssistantText={streamAssistantText}
               composerHint={
