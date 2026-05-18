@@ -89,12 +89,58 @@ function formatSessionSidebarLabel(sessionDate: string, subject: string, started
   return `${mo}月${da}日 ${subject} ${time}`;
 }
 
+function formatSessionTime(startedAtIso: string) {
+  const t = new Date(startedAtIso);
+  return t.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 type SessionRow = {
   session_slug: string;
   session_date: string;
   subject: string;
   started_at: string;
 };
+
+const MOBILE_SUBJECT_TAG_STYLES: Record<string, { bg: string; color: string }> = {
+  语文: { bg: "#fef3c7", color: "#92400e" },
+  数学: { bg: "#dbeafe", color: "#1e40af" },
+  英语: { bg: "#d1fae5", color: "#065f46" },
+  物理: { bg: "#ede9fe", color: "#5b21b6" },
+  化学: { bg: "#fce7f3", color: "#9d174d" },
+  生物: { bg: "#ccfbf1", color: "#065f46" },
+  政治: { bg: "#fee2e2", color: "#991b1b" },
+  历史: { bg: "#ffedd5", color: "#9a3412" },
+  地理: { bg: "#f3f4f6", color: "#374151" },
+};
+
+function drawerDateGroupLabel(sessionDate: string) {
+  const today = localYmd();
+  const yesterday = localYmd(new Date(Date.now() - 86_400_000));
+  if (sessionDate === today) return "今天";
+  if (sessionDate === yesterday) return "昨天";
+  const [, mo, da] = sessionDate.split("-").map(Number);
+  return `${mo}月${da}日`;
+}
+
+function groupSessionsForDrawer(rows: SessionRow[]) {
+  const order = ["今天", "昨天"];
+  const map = new Map<string, SessionRow[]>();
+  for (const row of rows) {
+    const label = drawerDateGroupLabel(row.session_date);
+    if (!map.has(label)) map.set(label, []);
+    map.get(label)!.push(row);
+  }
+  const dated = [...map.keys()].filter((k) => !order.includes(k));
+  dated.sort((a, b) => {
+    const rowA = map.get(a)?.[0];
+    const rowB = map.get(b)?.[0];
+    if (!rowA || !rowB) return 0;
+    return rowB.session_date.localeCompare(rowA.session_date);
+  });
+  const labels = [...order.filter((l) => map.has(l)), ...dated];
+  return labels.map((label) => ({ label, rows: map.get(label) ?? [] }));
+}
+
 type SidebarSessionFilter = "全部" | Subject;
 
 const SPRINT_EXAM_MAX_DAYS = 30;
@@ -140,6 +186,7 @@ function Review() {
   const [activeSessionSlug, setActiveSessionSlug] = useState<string | null>(null);
   const [chatRetrying, setChatRetrying] = useState(false);
   const [deleteDialogSession, setDeleteDialogSession] = useState<SessionRow | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const slugResolveGenRef = useRef(0);
   const slugNavSourceRef = useRef<"control" | "sidebar" | "plus" | "opening">("control");
   const sendAbortRef = useRef<AbortController | null>(null);
@@ -498,6 +545,11 @@ function Review() {
     set.add(selectedDate);
     return [...set].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
   }, [sessionIndex, selectedDate]);
+
+  const drawerSessionGroups = useMemo(
+    () => groupSessionsForDrawer(sessionIndex),
+    [sessionIndex],
+  );
 
   const runSilentSummary = useCallback(async () => {
     if (!user?.id || !activeSessionSlug) return;
@@ -935,13 +987,179 @@ function Review() {
       />
     ) : null;
 
+  const renderChatPanel = (layout: "default" | "mobile") => (
+    <SageChatPanel
+      layout={layout}
+      messages={messages}
+      draft={draft}
+      onDraftChange={setDraft}
+      onSubmit={() => void send()}
+      isSending={isSending}
+      emptyTitle={onboardingIncomplete ? "从这里开始" : "从这里开始复盘"}
+      emptyHint={
+        onboardingIncomplete
+          ? "先看 Sage 的第一条消息，然后随便用你自己的话说说就好。"
+          : "说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
+      }
+      placeholder={onboardingIncomplete ? "说说你的感觉…" : `聊聊今天的「${chatSubject}」…`}
+      expand
+      className="min-h-0 flex-1"
+      showHistorySkeleton={showHistorySkeleton}
+      streamingAssistantText={streamAssistantText}
+      composerHint={chatRetrying ? "重试中…" : isSending ? "Sage 正在输入…" : null}
+      betweenScrollAndInput={
+        userMessageCount >= 3 ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full rounded-xl border-dashed"
+            disabled={isEndingReview}
+            onClick={onEndReviewClick}
+          >
+            {isEndingReview ? "正在生成小结…" : "结束复盘"}
+          </Button>
+        ) : null
+      }
+      belowForm={summaryBelow}
+    />
+  );
+
+  const pickSessionFromDrawer = (row: SessionRow) => {
+    loadSessionFromPicker(row);
+    setDrawerOpen(false);
+  };
+
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname === "/app/review/archive") {
     return <Outlet />;
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+    <>
+      <div className="fixed inset-0 z-30 flex h-dvh flex-col overflow-hidden bg-background lg:hidden">
+        <div className="flex h-11 shrink-0 items-center justify-between px-4">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-white text-lg leading-none text-foreground"
+            aria-label="打开复盘历史"
+          >
+            ☰
+          </button>
+          <p className="min-w-0 flex-1 truncate text-center text-[15px] font-medium text-foreground">
+            {chatSubject}复盘
+          </p>
+          <Link
+            to="/app/review/archive"
+            className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            弱点档案
+          </Link>
+        </div>
+
+        {!onboardingIncomplete && (
+          <div className="scrollbar-hide flex h-10 shrink-0 items-center gap-2 overflow-x-auto px-4">
+            {SUBJECTS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => switchSubject(s)}
+                className={cn(
+                  "shrink-0 rounded-[20px] border px-[14px] py-[5px] text-xs font-medium leading-none transition",
+                  subject === s
+                    ? "border-[#1a1a2e] bg-[#1a1a2e] text-white"
+                    : "border-border bg-white text-muted-foreground",
+                )}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {renderChatPanel("mobile")}
+
+        {drawerOpen ? (
+          <button
+            type="button"
+            className="fixed inset-0 z-40 bg-black/40"
+            aria-label="关闭复盘历史"
+            onClick={() => setDrawerOpen(false)}
+          />
+        ) : null}
+        <div
+          className={cn(
+            "fixed left-0 top-0 z-50 flex h-full w-[78%] max-w-sm flex-col bg-white shadow-xl transition-transform duration-200 ease-out",
+            drawerOpen ? "translate-x-0" : "pointer-events-none -translate-x-full",
+          )}
+        >
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+            <h2 className="text-base font-semibold">复盘历史</h2>
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-muted-foreground hover:bg-muted"
+              aria-label="关闭"
+            >
+              ×
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]">
+            {drawerSessionGroups.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">暂无复盘记录</p>
+            ) : (
+              drawerSessionGroups.map((group) => (
+                <div key={group.label} className="mb-4">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">{group.label}</p>
+                  <ul className="space-y-2">
+                    {group.rows.map((row) => {
+                      const tag =
+                        MOBILE_SUBJECT_TAG_STYLES[row.subject] ?? MOBILE_SUBJECT_TAG_STYLES["地理"];
+                      const active = activeSessionSlug === row.session_slug;
+                      return (
+                        <li key={row.session_slug}>
+                          <button
+                            type="button"
+                            onClick={() => pickSessionFromDrawer(row)}
+                            className={cn(
+                              "w-full rounded-lg border px-3 py-2.5 text-left transition",
+                              active
+                                ? "border-primary/40 bg-primary/5"
+                                : "border-border bg-white hover:bg-muted/50",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span
+                                className="shrink-0 rounded px-2 py-0.5 text-xs font-medium"
+                                style={{ backgroundColor: tag.bg, color: tag.color }}
+                              >
+                                {row.subject}
+                              </span>
+                              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                                {formatSessionTime(row.started_at)}
+                              </span>
+                            </div>
+                            <p className="mt-1.5 line-clamp-2 text-sm text-foreground">
+                              {formatSessionSidebarLabel(
+                                row.session_date,
+                                row.subject,
+                                row.started_at,
+                              )}
+                            </p>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="hidden h-full min-h-0 flex-1 flex-col overflow-hidden lg:flex">
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 pt-4 md:px-5">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
@@ -1141,45 +1359,11 @@ function Review() {
           )}
           </div>
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col max-lg:h-[calc(100dvh-120px)]">
-          <SageChatPanel
-              messages={messages}
-              draft={draft}
-              onDraftChange={setDraft}
-              onSubmit={() => void send()}
-              isSending={isSending}
-              emptyTitle={onboardingIncomplete ? "从这里开始" : "从这里开始复盘"}
-              emptyHint={
-                onboardingIncomplete
-                  ? "先看 Sage 的第一条消息，然后随便用你自己的话说说就好。"
-                  : "说说今天这科哪里最耗你、最不想碰，或最懵的一道题。"
-              }
-              placeholder={onboardingIncomplete ? "说说你的感觉…" : `聊聊今天的「${chatSubject}」…`}
-              expand
-              className="min-h-0 flex-1"
-              showHistorySkeleton={showHistorySkeleton}
-              streamingAssistantText={streamAssistantText}
-              composerHint={
-                chatRetrying ? "重试中…" : isSending ? "Sage 正在输入…" : null
-              }
-              betweenScrollAndInput={
-                userMessageCount >= 3 ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="w-full rounded-xl border-dashed"
-                    disabled={isEndingReview}
-                    onClick={onEndReviewClick}
-                  >
-                    {isEndingReview ? "正在生成小结…" : "结束复盘"}
-                  </Button>
-                ) : null
-              }
-              belowForm={summaryBelow}
-            />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {renderChatPanel("default")}
           </div>
         </div>
+      </div>
       </div>
 
       <AlertDialog
@@ -1202,6 +1386,6 @@ function Review() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

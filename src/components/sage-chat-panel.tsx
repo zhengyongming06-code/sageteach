@@ -54,6 +54,8 @@ type SageChatPanelProps = {
   style?: CSSProperties;
   /** Fill parent flex column (scroll area grows, min-h-0). */
   expand?: boolean;
+  /** Mobile chat-first bubble and composer styling. */
+  layout?: "default" | "mobile";
   /** Rendered between the message list and the composer (e.g. actions). */
   betweenScrollAndInput?: ReactNode;
   /** Rendered after the composer (e.g. summary cards). */
@@ -65,6 +67,32 @@ type SageChatPanelProps = {
   /** Subtle status under the composer (e.g. retry hint). */
   composerHint?: string | null;
 };
+
+function AssistantBubbleContent({
+  content,
+  streaming,
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
+  return (
+    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
+      {content !== "" ? (
+        <ReactMarkdown urlTransform={markdownUrlTransform} components={markdownComponents}>
+          {content}
+        </ReactMarkdown>
+      ) : null}
+      {streaming ? (
+        <span
+          className="ml-0.5 inline-block animate-[sage-cursor_1s_steps(2)_infinite] select-none font-mono text-primary"
+          aria-hidden
+        >
+          ▋
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 export function SageChatPanel({
   messages,
@@ -78,12 +106,14 @@ export function SageChatPanel({
   className = "",
   style,
   expand = false,
+  layout = "default",
   betweenScrollAndInput,
   belowForm,
   showHistorySkeleton = false,
   streamingAssistantText = null,
   composerHint = null,
 }: SageChatPanelProps) {
+  const isMobile = layout === "mobile";
   const scrollRef = useRef<HTMLDivElement>(null);
   const newBubbleRef = useRef<HTMLDivElement | null>(null);
   const knownMessageIdsRef = useRef<Set<string>>(new Set());
@@ -135,6 +165,26 @@ export function SageChatPanel({
   const showTypingDots =
     isSending && (streamingAssistantText == null || streamingAssistantText === "");
 
+  const renderAssistantBubble = (content: string, streaming = false, key?: string) => (
+    <div key={key} className="flex justify-start">
+      {isMobile ? (
+        <div className="flex max-w-[88%] flex-col items-start gap-1">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
+            Sage
+          </div>
+          <div className="rounded-[4px_16px_16px_16px] border border-border bg-white px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+            <AssistantBubbleContent content={content} streaming={streaming} />
+          </div>
+        </div>
+      ) : (
+        <div className="max-w-[88%] rounded-2xl border border-border bg-background px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+          <AssistantBubbleContent content={content} streaming={streaming} />
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div
       className={cn(
@@ -146,31 +196,26 @@ export function SageChatPanel({
     >
       <div
         ref={scrollRef}
-        className={
-          expand
-            ? "min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 max-lg:rounded-none max-lg:border-x-0 max-lg:border-t-0"
-            : "min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]"
-        }
+        className={cn(
+          isMobile
+            ? "min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
+            : expand
+              ? "min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4"
+              : "min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]",
+        )}
       >
         {empty && (
           <div
-            className={`grid flex-1 place-items-center px-4 text-center ${expand ? "min-h-0" : "h-full min-h-[180px]"}`}
+            className={cn(
+              "grid flex-1 place-items-center px-4 text-center",
+              expand || isMobile ? "min-h-0" : "h-full min-h-[180px]",
+            )}
           >
             <div>
-              <p
-                className={cn(
-                  "text-[15px] text-foreground",
-                  expand && "max-lg:text-center max-lg:text-sm",
-                )}
-              >
+              <p className={cn("text-foreground", isMobile ? "text-sm" : "text-[15px]")}>
                 {emptyTitle}
               </p>
-              <p
-                className={cn(
-                  "mt-2 text-sm text-muted-foreground",
-                  expand && "max-lg:text-center max-lg:text-xs",
-                )}
-              >
+              <p className={cn("mt-2 text-muted-foreground", isMobile ? "text-xs" : "text-sm")}>
                 {emptyHint}
               </p>
             </div>
@@ -179,8 +224,17 @@ export function SageChatPanel({
         {showHistorySkeleton && messages.length === 0 && !isSending && (
           <div className="space-y-3">
             {(["w-56", "w-44", "w-64", "w-40"] as const).map((w, i) => (
-              <div key={i} className={`flex ${i % 2 === 0 ? "justify-start" : "justify-end"}`}>
-                <div className={cn("h-11 max-w-[88%] animate-pulse rounded-2xl bg-muted/70", w)} />
+              <div
+                key={i}
+                className={`flex ${i % 2 === 0 ? "justify-start" : "justify-end"}`}
+              >
+                <div
+                  className={cn(
+                    "h-11 max-w-[88%] animate-pulse bg-muted/70",
+                    isMobile ? "rounded-[4px_16px_16px_16px]" : "rounded-2xl",
+                    w,
+                  )}
+                />
               </div>
             ))}
           </div>
@@ -188,132 +242,140 @@ export function SageChatPanel({
         {messages.map((msg) => {
           const isFlyingUser =
             msg.role === "user" && (msg.isNew === true || msg.id === flyingUserMessageId);
+          const isUser = msg.role === "user";
           return (
             <div
               key={msg.id}
               data-message-id={msg.id}
               ref={isFlyingUser ? newBubbleRef : undefined}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex ${isUser ? "justify-end" : "justify-start"}`}
             >
-              <div
-                className={cn(
-                  "max-w-[88%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
-                  msg.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border bg-background text-foreground",
-                  isFlyingUser && "message-new",
-                )}
-              >
-                {msg.role === "assistant" ? (
-                  <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
-                    <ReactMarkdown
-                      urlTransform={markdownUrlTransform}
-                      components={markdownComponents}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
+              {isUser ? (
+                <div
+                  className={cn(
+                    "max-w-[88%] px-4 py-2.5 text-[15px] leading-relaxed",
+                    isMobile
+                      ? "rounded-[16px_4px_16px_16px] bg-[#1a1a2e] text-white"
+                      : "rounded-2xl bg-primary text-primary-foreground",
+                    isFlyingUser && "message-new",
+                  )}
+                >
                   <p className="whitespace-pre-wrap">{msg.content}</p>
-                )}
-              </div>
+                </div>
+              ) : (
+                renderAssistantBubble(msg.content)
+              )}
             </div>
           );
         })}
-        {streamingAssistantText != null && (
-          <div className="flex justify-start">
-            <div className="max-w-[88%] rounded-2xl border border-border bg-background px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
-              <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
-                {streamingAssistantText !== "" ? (
-                  <ReactMarkdown
-                    urlTransform={markdownUrlTransform}
-                    components={markdownComponents}
-                  >
-                    {streamingAssistantText}
-                  </ReactMarkdown>
-                ) : null}
-                <span
-                  className="ml-0.5 inline-block animate-[sage-cursor_1s_steps(2)_infinite] select-none font-mono text-primary"
-                  aria-hidden
-                >
-                  ▋
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
+        {streamingAssistantText != null &&
+          renderAssistantBubble(streamingAssistantText, true, "__streaming__")}
         {showTypingDots && (
           <div className="flex justify-start">
-            <div className="rounded-2xl border border-border bg-background px-4 py-2.5 text-sm text-muted-foreground">
-              <span className="inline-flex gap-1">
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
-              </span>
-            </div>
+            {isMobile ? (
+              <div className="flex flex-col items-start gap-1">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
+                  Sage
+                </div>
+                <div className="rounded-[4px_16px_16px_16px] border border-border bg-white px-4 py-2.5 text-sm text-muted-foreground">
+                  <span className="inline-flex gap-1">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-border bg-background px-4 py-2.5 text-sm text-muted-foreground">
+                <span className="inline-flex gap-1">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      <div
-        className={cn(
-          "shrink-0",
-          expand &&
-            "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm max-lg:safe-bottom",
-        )}
-      >
+      <div className={cn("shrink-0", !isMobile && expand && "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm")}>
         {betweenScrollAndInput ? (
-          <div className="mt-3 shrink-0 max-lg:mt-2 max-lg:px-4">{betweenScrollAndInput}</div>
+          <div className={cn("mt-3 shrink-0", isMobile && "px-4")}>
+            {betweenScrollAndInput}
+          </div>
         ) : null}
 
         {composerHint ? (
-          <p className="mt-2 text-center text-xs text-muted-foreground/90 tabular-nums max-lg:mt-1">
+          <p className="mt-2 text-center text-xs text-muted-foreground/90 tabular-nums">
             {composerHint}
           </p>
         ) : null}
 
-        <form
-          className={cn(
-            "flex shrink-0 items-end gap-2 pb-1 pt-2",
-            expand
-              ? "max-lg:h-[52px] max-lg:items-center max-lg:gap-1.5 max-lg:px-4 max-lg:py-0 max-lg:pb-0"
-              : "safe-bottom",
-          )}
-          onSubmit={(e) => {
-            e.preventDefault();
-            onSubmit();
-          }}
-        >
-          <Textarea
-            value={draft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                onSubmit();
-              }
+        {isMobile ? (
+          <form
+            className="flex h-[52px] shrink-0 items-center px-4 py-[10px]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onSubmit();
             }}
-            placeholder={placeholder}
-            className={cn(
-              "min-h-12 flex-1 resize-none rounded-xl border-border bg-card",
-              expand &&
-                "max-lg:min-h-0 max-lg:h-9 max-lg:py-2 max-lg:text-base max-lg:leading-5",
-            )}
-          />
-          <Button
-            type="submit"
-            disabled={!draft.trim() || isSending}
-            size="icon"
-            className={cn(
-              "h-12 w-12 shrink-0 rounded-xl",
-              expand && "max-lg:h-11 max-lg:w-11",
-            )}
           >
-            <Send className="h-4 w-4" />
-          </Button>
-        </form>
+            <div className="relative flex min-w-0 flex-1 items-center">
+              <Textarea
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    onSubmit();
+                  }
+                }}
+                placeholder={placeholder}
+                rows={1}
+                className="min-h-0 h-9 w-full resize-none rounded-[24px] border border-border bg-white py-2 pl-4 pr-12 text-base leading-5"
+              />
+              <Button
+                type="submit"
+                disabled={!draft.trim() || isSending}
+                size="icon"
+                className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full bg-[#1a1a2e] text-white hover:bg-[#1a1a2e]/90"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <form
+            className="safe-bottom flex shrink-0 items-end gap-2 pb-1 pt-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onSubmit();
+            }}
+          >
+            <Textarea
+              value={draft}
+              onChange={(e) => onDraftChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  onSubmit();
+                }
+              }}
+              placeholder={placeholder}
+              className="min-h-12 flex-1 resize-none rounded-xl border-border bg-card"
+            />
+            <Button
+              type="submit"
+              disabled={!draft.trim() || isSending}
+              size="icon"
+              className="h-12 w-12 shrink-0 rounded-xl"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </form>
+        )}
 
-      {belowForm ? <div className="mt-4 shrink-0">{belowForm}</div> : null}
+        {belowForm ? <div className={cn("mt-4 shrink-0", isMobile && "px-4 pb-4")}>{belowForm}</div> : null}
       </div>
     </div>
   );
