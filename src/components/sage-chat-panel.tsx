@@ -134,7 +134,13 @@ export function SageChatPanel({
     isSending && (streamingAssistantText == null || streamingAssistantText === "");
 
   return (
-    <div className={`flex min-h-0 flex-1 flex-col ${className}`}>
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col",
+        expand && "h-full min-h-0",
+        className,
+      )}
+    >
       <div
         ref={scrollRef}
         className={

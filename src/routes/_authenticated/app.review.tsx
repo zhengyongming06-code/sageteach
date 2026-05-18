@@ -1053,7 +1053,8 @@ function Review() {
           </button>
         </aside>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col space-y-3 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="shrink-0 space-y-3">
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">科目</p>
             {onboardingIncomplete ? (
@@ -1138,7 +1139,9 @@ function Review() {
               这是新会话；发第一条消息后，该日期会出现在左侧列表。
             </p>
           )}
+          </div>
 
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <SageChatPanel
               messages={messages}
               draft={draft}
@@ -1175,6 +1178,7 @@ function Review() {
               }
               belowForm={summaryBelow}
             />
+          </div>
         </div>
       </div>
 
