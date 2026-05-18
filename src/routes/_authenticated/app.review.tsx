@@ -36,7 +36,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { History, MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import {
   ONBOARDING_REVIEW_SUBJECT,
   POST_FIRST_ONBOARDING_SESSION_CLOSING,
@@ -96,93 +96,6 @@ type SessionRow = {
   started_at: string;
 };
 type SidebarSessionFilter = "全部" | Subject;
-
-function ReviewSessionPicker({
-  compact = false,
-  mobileSessionOptions,
-  dateOptions,
-  activeSessionSlug,
-  selectedDate,
-  onPickSession,
-  onPickDate,
-}: {
-  compact?: boolean;
-  mobileSessionOptions: SessionRow[];
-  dateOptions: string[];
-  activeSessionSlug: string | null;
-  selectedDate: string;
-  onPickSession: (row: SessionRow) => void;
-  onPickDate: (d: string) => void;
-}) {
-  const triggerClass = cn(
-    "border-border bg-card",
-    compact
-      ? "h-8 max-w-[5.5rem] shrink-0 gap-1 rounded-full px-2.5 text-[13px]"
-      : "w-full rounded-xl",
-  );
-
-  const activeRow = mobileSessionOptions.find((r) => r.session_slug === activeSessionSlug);
-  const compactLabel =
-    activeRow != null
-      ? formatSessionSidebarLabel(activeRow.session_date, activeRow.subject, activeRow.started_at)
-      : "历史";
-
-  if (mobileSessionOptions.length > 0) {
-    return (
-      <Select
-        value={activeSessionSlug ?? "__none__"}
-        onValueChange={(v) => {
-          if (v === "__none__") return;
-          const row = mobileSessionOptions.find((r) => r.session_slug === v);
-          if (row) onPickSession(row);
-        }}
-      >
-        <SelectTrigger className={triggerClass} aria-label="历史记录">
-          {compact ? (
-            <>
-              <History className="h-3.5 w-3.5 shrink-0 opacity-80" />
-              <span className="min-w-0 truncate">{compactLabel}</span>
-            </>
-          ) : (
-            <SelectValue placeholder="选择场次" />
-          )}
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__" disabled>
-            选择场次
-          </SelectItem>
-          {mobileSessionOptions.map((s) => (
-            <SelectItem key={s.session_slug} value={s.session_slug}>
-              {formatSessionSidebarLabel(s.session_date, s.subject, s.started_at)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-  }
-
-  return (
-    <Select value={selectedDate} onValueChange={onPickDate}>
-      <SelectTrigger className={triggerClass} aria-label="复盘日期">
-        {compact ? (
-          <>
-            <History className="h-3.5 w-3.5 shrink-0 opacity-80" />
-            <span className="min-w-0 truncate">{formatDateLabel(selectedDate)}</span>
-          </>
-        ) : (
-          <SelectValue placeholder="选择日期" />
-        )}
-      </SelectTrigger>
-      <SelectContent>
-        {dateOptions.map((d) => (
-          <SelectItem key={d} value={d}>
-            {formatDateLabel(d)} · {d}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
 
 const SPRINT_EXAM_MAX_DAYS = 30;
 
@@ -1028,30 +941,29 @@ function Review() {
   }
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
-      <header className="flex shrink-0 items-center justify-between max-lg:h-11 max-lg:px-4 lg:flex-wrap lg:items-start lg:gap-3 lg:px-5 lg:pt-4">
-        <div className="min-w-0">
-          <h1 className="text-base font-semibold leading-none tracking-tight lg:text-3xl">Review</h1>
-          <p className="mt-1 hidden text-sm text-muted-foreground lg:block">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 pt-4 md:px-5">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             选一科，和 Sage 聊聊今天哪里卡住——用问题把模糊变成具体。
           </p>
         </div>
         <Link
           to="/app/review/archive"
-          className="shrink-0 whitespace-nowrap text-[13px] font-medium text-primary underline-offset-4 hover:underline lg:text-sm"
+          className="shrink-0 text-sm font-medium text-primary underline-offset-4 hover:underline"
         >
-          <span className="lg:hidden">弱点档案</span>
-          <span className="hidden lg:inline">查看我的弱点档案</span>
+          查看我的弱点档案
         </Link>
       </header>
 
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col overflow-hidden",
-          "lg:flex-row lg:items-stretch lg:gap-4 lg:px-5 lg:pb-4",
+          "flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-4 md:px-5",
+          "lg:flex-row lg:items-stretch",
         )}
       >
-        <aside className="hidden shrink-0 border-border lg:block lg:w-56 lg:border-r lg:pr-5">
+        <aside className="hidden lg:block lg:w-56 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Sessions
           </p>
@@ -1142,42 +1054,7 @@ function Review() {
         </aside>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-4 lg:hidden">
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
-              {!onboardingIncomplete &&
-                SUBJECTS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => switchSubject(s)}
-                    className={cn(
-                      "shrink-0 rounded-full border px-3 py-1 text-[13px] font-medium leading-none transition",
-                      subject === s
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border bg-card text-foreground",
-                    )}
-                  >
-                    {s}
-                  </button>
-                ))}
-            </div>
-            <ReviewSessionPicker
-              compact
-              mobileSessionOptions={mobileSessionOptions}
-              dateOptions={dateOptions}
-              activeSessionSlug={activeSessionSlug}
-              selectedDate={selectedDate}
-              onPickSession={loadSessionFromPicker}
-              onPickDate={(d) => {
-                bumpSessionScope();
-                resetChatUiForScopeChange();
-                setActiveSessionSlug(null);
-                setSelectedDate(d);
-              }}
-            />
-          </div>
-
-          <div className="shrink-0 space-y-3 max-lg:hidden">
+          <div className="shrink-0 space-y-3">
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">科目</p>
             {onboardingIncomplete ? (
@@ -1205,34 +1082,67 @@ function Review() {
             )}
           </div>
 
-          <div>
+          <div className="hidden lg:block">
             <p className="mb-2 text-xs font-medium text-muted-foreground">
               {mobileSessionOptions.length > 0 ? "复盘场次" : "复盘日期"}
             </p>
-            <ReviewSessionPicker
-              mobileSessionOptions={mobileSessionOptions}
-              dateOptions={dateOptions}
-              activeSessionSlug={activeSessionSlug}
-              selectedDate={selectedDate}
-              onPickSession={loadSessionFromPicker}
-              onPickDate={(d) => {
-                bumpSessionScope();
-                resetChatUiForScopeChange();
-                setActiveSessionSlug(null);
-                setSelectedDate(d);
-              }}
-            />
+            {mobileSessionOptions.length > 0 ? (
+              <Select
+                value={activeSessionSlug ?? "__none__"}
+                onValueChange={(v) => {
+                  if (v === "__none__") return;
+                  const row = mobileSessionOptions.find((r) => r.session_slug === v);
+                  if (!row) return;
+                  loadSessionFromPicker(row);
+                }}
+              >
+                <SelectTrigger className="rounded-xl border-border bg-card">
+                  <SelectValue placeholder="选择场次" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__" disabled>
+                    选择场次
+                  </SelectItem>
+                  {mobileSessionOptions.map((s) => (
+                    <SelectItem key={s.session_slug} value={s.session_slug}>
+                      {formatSessionSidebarLabel(s.session_date, s.subject, s.started_at)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Select
+                value={selectedDate}
+                onValueChange={(d) => {
+                  bumpSessionScope();
+                  resetChatUiForScopeChange();
+                  setActiveSessionSlug(null);
+                  setSelectedDate(d);
+                }}
+              >
+                <SelectTrigger className="rounded-xl border-border bg-card">
+                  <SelectValue placeholder="选择日期" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dateOptions.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {formatDateLabel(d)} · {d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {!onboardingIncomplete && !hasSessionForSelectedDate && messages.length === 0 && (
-            <p className="text-xs text-muted-foreground max-lg:hidden">
+            <p className="text-xs text-muted-foreground">
               这是新会话；发第一条消息后，该日期会出现在左侧列表。
             </p>
           )}
           </div>
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <SageChatPanel
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col max-lg:h-[calc(100dvh-120px)]">
+          <SageChatPanel
               messages={messages}
               draft={draft}
               onDraftChange={setDraft}
