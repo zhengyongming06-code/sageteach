@@ -176,6 +176,13 @@
   }
   .text-balance { text-wrap: balance; }
   .safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 0.5rem); }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @keyframes messageFlyUp {

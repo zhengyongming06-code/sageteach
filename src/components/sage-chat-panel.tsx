@@ -148,7 +148,7 @@ export function SageChatPanel({
         ref={scrollRef}
         className={
           expand
-            ? "min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4"
+            ? "min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 max-lg:rounded-none max-lg:border-x-0 max-lg:border-t-0"
             : "min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]"
         }
       >
@@ -157,8 +157,22 @@ export function SageChatPanel({
             className={`grid flex-1 place-items-center px-4 text-center ${expand ? "min-h-0" : "h-full min-h-[180px]"}`}
           >
             <div>
-              <p className="text-[15px] text-foreground">{emptyTitle}</p>
-              <p className="mt-2 text-sm text-muted-foreground">{emptyHint}</p>
+              <p
+                className={cn(
+                  "text-[15px] text-foreground",
+                  expand && "max-lg:text-center max-lg:text-sm",
+                )}
+              >
+                {emptyTitle}
+              </p>
+              <p
+                className={cn(
+                  "mt-2 text-sm text-muted-foreground",
+                  expand && "max-lg:text-center max-lg:text-xs",
+                )}
+              >
+                {emptyHint}
+              </p>
             </div>
           </div>
         )}
@@ -245,45 +259,59 @@ export function SageChatPanel({
         className={cn(
           "shrink-0",
           expand &&
-            "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm",
+            "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm max-lg:safe-bottom",
         )}
       >
-      {betweenScrollAndInput ? <div className="mt-3 shrink-0">{betweenScrollAndInput}</div> : null}
+        {betweenScrollAndInput ? (
+          <div className="mt-3 shrink-0 max-lg:mt-2 max-lg:px-4">{betweenScrollAndInput}</div>
+        ) : null}
 
-      {composerHint ? (
-        <p className="mt-2 text-center text-xs text-muted-foreground/90 tabular-nums">
-          {composerHint}
-        </p>
-      ) : null}
+        {composerHint ? (
+          <p className="mt-2 text-center text-xs text-muted-foreground/90 tabular-nums max-lg:mt-1">
+            {composerHint}
+          </p>
+        ) : null}
 
-      <form
-        className="safe-bottom flex shrink-0 items-end gap-2 pb-1 pt-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSubmit();
-        }}
-      >
-        <Textarea
-          value={draft}
-          onChange={(e) => onDraftChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              onSubmit();
-            }
+        <form
+          className={cn(
+            "flex shrink-0 items-end gap-2 pb-1 pt-2",
+            expand
+              ? "max-lg:h-[52px] max-lg:items-center max-lg:gap-1.5 max-lg:px-4 max-lg:py-0 max-lg:pb-0"
+              : "safe-bottom",
+          )}
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit();
           }}
-          placeholder={placeholder}
-          className="min-h-12 flex-1 resize-none rounded-xl border-border bg-card"
-        />
-        <Button
-          type="submit"
-          disabled={!draft.trim() || isSending}
-          size="icon"
-          className="h-12 w-12 shrink-0 rounded-xl"
         >
-          <Send className="h-4 w-4" />
-        </Button>
-      </form>
+          <Textarea
+            value={draft}
+            onChange={(e) => onDraftChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            placeholder={placeholder}
+            className={cn(
+              "min-h-12 flex-1 resize-none rounded-xl border-border bg-card",
+              expand &&
+                "max-lg:min-h-0 max-lg:h-9 max-lg:py-2 max-lg:text-base max-lg:leading-5",
+            )}
+          />
+          <Button
+            type="submit"
+            disabled={!draft.trim() || isSending}
+            size="icon"
+            className={cn(
+              "h-12 w-12 shrink-0 rounded-xl",
+              expand && "max-lg:h-11 max-lg:w-11",
+            )}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </form>
 
       {belowForm ? <div className="mt-4 shrink-0">{belowForm}</div> : null}
       </div>
