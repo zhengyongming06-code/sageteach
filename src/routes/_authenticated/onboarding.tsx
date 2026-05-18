@@ -27,17 +27,18 @@ function Onboarding() {
 
   useEffect(() => {
     if (!user) return;
-    void supabase
-      .from("profiles")
-      .select("onboarded")
-      .eq("id", user.id)
-      .maybeSingle()
-      .then(({ data }) => {
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("onboarded")
+          .eq("id", user.id)
+          .maybeSingle();
         if (data?.onboarded) nav({ to: "/app/today" });
-      })
-      .catch((err) => {
+      } catch (err) {
         console.warn("[onboarding] profile onboarded check failed", err);
-      });
+      }
+    })();
   }, [user, nav]);
 
   const next = () => setStep((s) => s + 1);

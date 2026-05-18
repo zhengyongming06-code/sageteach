@@ -1,4 +1,20 @@
+import { queryOptions } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+
+/** Cached archive stays fresh; background refetch after this window. */
+export const WEAK_ARCHIVE_STALE_MS = 5 * 60 * 1000;
+
+export function weakArchiveQueryKey(userId: string) {
+  return ["weak-point-archive", userId] as const;
+}
+
+export function weakArchiveQueryOptions(userId: string) {
+  return queryOptions({
+    queryKey: weakArchiveQueryKey(userId),
+    queryFn: () => fetchWeakArchive(userId),
+    staleTime: WEAK_ARCHIVE_STALE_MS,
+  });
+}
 
 export type WeakArchiveRow = {
   id: string;

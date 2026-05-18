@@ -52,6 +52,37 @@ export function reviewContextSuffix(subject: string, sessionDate: string) {
   return `\n\n当前上下文：学生正在复盘「${subject}」；本次复盘日期是 ${sessionDate}。`;
 }
 
+/**
+ * Hard isolation for Review chat: model must not blend other subjects/sessions.
+ * Appended to every DeepSeek system prompt on the Review route.
+ */
+export function reviewSubjectIsolationSuffix(subject: string, sessionDate: string) {
+  return `\n\n【科目与场次隔离 — 必须遵守】
+你现在是「${subject}」复盘助手。本次复盘科目是【${subject}】。复盘日期是 ${sessionDate}。
+- 只讨论「${subject}」的学习内容、错题、知识点与情绪；不要提及、引用或混入其他科目（如语文/数学/英语等）的内容。
+- 对话记录仅来自当前这一场复盘；不要把其他科目或其他场次的聊天当作上下文。
+- 若学生提到别的科目，可简短确认是否要切换到那一科，但在当前场次内仍只围绕「${subject}」继续。`;
+}
+
+export function buildReviewDeepSeekSystemPrompt(options: {
+  subject: string;
+  sessionDate: string;
+  onboardingIncomplete: boolean;
+  sprintMode: boolean;
+}): string {
+  const { subject, sessionDate, onboardingIncomplete, sprintMode } = options;
+  let sys =
+    SAGE_DEEPSEEK_SYSTEM_PROMPT +
+    SAGE_DUAL_MODE_SUFFIX +
+    REVIEW_PRACTICE_PROBLEM_SUFFIX +
+    SAGE_RESOURCE_RECOMMENDATIONS_SUFFIX +
+    reviewContextSuffix(subject, sessionDate) +
+    reviewSubjectIsolationSuffix(subject, sessionDate);
+  if (onboardingIncomplete) sys += FIRST_REVIEW_GUIDED_SESSION_SUFFIX;
+  if (sprintMode) sys += SAGE_SPRINT_MODE_SUFFIX;
+  return sys;
+}
+
 /** First guided review session: must complete three outcomes before closing (Chinese). */
 export const FIRST_REVIEW_GUIDED_SESSION_SUFFIX = `
 

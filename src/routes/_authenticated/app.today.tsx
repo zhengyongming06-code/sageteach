@@ -10,7 +10,14 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { subjectAccentCardClass, subjectBadgeClass } from "@/lib/subject-accent";
-import { fetchWeakArchive, formatArchiveDateLabel, persistTaskCompletion, type WeakArchiveRow } from "@/lib/weak-archive";
+import {
+  fetchWeakArchive,
+  formatArchiveDateLabel,
+  persistTaskCompletion,
+  weakArchiveQueryKey,
+  weakArchiveQueryOptions,
+  type WeakArchiveRow,
+} from "@/lib/weak-archive";
 import { fetchUserExams, pickNearestExam, syncProfileNearestExam, type UserExamRow } from "@/lib/user-exams";
 import { raceQueryTimeout } from "@/lib/query-timeout";
 import {
@@ -275,7 +282,7 @@ function Today() {
     isLoading: archiveLoading,
     isError: archiveError,
   } = useQuery({
-    queryKey: ["weak-point-archive", user?.id],
+    ...weakArchiveQueryOptions(user!.id),
     enabled: !!user?.id,
     queryFn: () =>
       raceQueryTimeout(TODAY_FETCH_MS, [], async () => {

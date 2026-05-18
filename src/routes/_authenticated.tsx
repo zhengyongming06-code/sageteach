@@ -1,7 +1,8 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { weakArchiveQueryOptions } from "@/lib/weak-archive";
 
 export const Route = createFileRoute("/_authenticated")({
   component: Guard,
@@ -9,6 +10,7 @@ export const Route = createFileRoute("/_authenticated")({
 
 function Guard() {
   const { session, loading } = useAuth();
+  const qc = useQueryClient();
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
@@ -20,6 +22,12 @@ function Guard() {
     }
     setChecked(true);
   }, [loading, session]);
+
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (loading || !uid) return;
+    void qc.prefetchQuery(weakArchiveQueryOptions(uid));
+  }, [loading, session?.user?.id, qc]);
 
   if (loading || !checked) {
     return (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Send } from "lucide-react";
@@ -37,6 +37,8 @@ export type SageChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Set by parent for one frame after send; panel also detects sends internally. */
+  isNew?: boolean;
 };
 
 type SageChatPanelProps = {
@@ -81,16 +83,52 @@ export function SageChatPanel({
   composerHint = null,
 }: SageChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const newBubbleRef = useRef<HTMLDivElement | null>(null);
+  const knownMessageIdsRef = useRef<Set<string>>(new Set());
+  const [flyingUserMessageId, setFlyingUserMessageId] = useState<string | null>(null);
   const empty =
     messages.length === 0 && !isSending && !showHistorySkeleton && streamingAssistantText == null;
 
   useEffect(() => {
+    const known = knownMessageIdsRef.current;
+    const newUserMessages = messages.filter((m) => m.role === "user" && !known.has(m.id));
+    const last = messages[messages.length - 1];
+
+    if (
+      newUserMessages.length === 1 &&
+      last?.role === "user" &&
+      last.id === newUserMessages[0].id &&
+      isSending
+    ) {
+      setFlyingUserMessageId(last.id);
+      const clearFly = window.setTimeout(() => setFlyingUserMessageId(null), 150);
+      knownMessageIdsRef.current = new Set(messages.map((m) => m.id));
+      return () => window.clearTimeout(clearFly);
+    }
+
+    knownMessageIdsRef.current = new Set(messages.map((m) => m.id));
+  }, [messages, isSending]);
+
+  useEffect(() => {
+    if (!flyingUserMessageId) return;
+    const id = flyingUserMessageId;
+    const raf = requestAnimationFrame(() => {
+      const target =
+        newBubbleRef.current ??
+        scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${id}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "end" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [flyingUserMessageId]);
+
+  useEffect(() => {
+    if (flyingUserMessageId) return;
     const el = scrollRef.current;
     if (!el) return;
     requestAnimationFrame(() => {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     });
-  }, [messages, isSending, streamingAssistantText]);
+  }, [messages, isSending, streamingAssistantText, flyingUserMessageId]);
 
   const showTypingDots =
     isSending && (streamingAssistantText == null || streamingAssistantText === "");
@@ -107,7 +145,7 @@ export function SageChatPanel({
       >
         {empty && (
           <div
-            className={`grid place-items-center px-4 text-center ${expand ? "min-h-[min(40vh,240px)]" : "h-full min-h-[180px]"}`}
+            className={`grid flex-1 place-items-center px-4 text-center ${expand ? "min-h-0" : "h-full min-h-[180px]"}`}
           >
             <div>
               <p className="text-[15px] text-foreground">{emptyTitle}</p>
@@ -124,33 +162,41 @@ export function SageChatPanel({
             ))}
           </div>
         )}
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+        {messages.map((msg) => {
+          const isFlyingUser =
+            msg.role === "user" && (msg.isNew === true || msg.id === flyingUserMessageId);
+          return (
             <div
-              className={`max-w-[88%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "border border-border bg-background text-foreground"
-              }`}
+              key={msg.id}
+              data-message-id={msg.id}
+              ref={isFlyingUser ? newBubbleRef : undefined}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              {msg.role === "assistant" ? (
-                <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
-                  <ReactMarkdown
-                    urlTransform={markdownUrlTransform}
-                    components={markdownComponents}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <p className="whitespace-pre-wrap">{msg.content}</p>
-              )}
+              <div
+                className={cn(
+                  "max-w-[88%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "border border-border bg-background text-foreground",
+                  isFlyingUser && "message-new",
+                )}
+              >
+                {msg.role === "assistant" ? (
+                  <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
+                    <ReactMarkdown
+                      urlTransform={markdownUrlTransform}
+                      components={markdownComponents}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {streamingAssistantText != null && (
           <div className="flex justify-start">
             <div className="max-w-[88%] rounded-2xl border border-border bg-background px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
@@ -195,7 +241,7 @@ export function SageChatPanel({
       ) : null}
 
       <form
-        className="mt-3 flex items-end gap-2"
+        className="safe-bottom mt-3 flex shrink-0 items-end gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           onSubmit();

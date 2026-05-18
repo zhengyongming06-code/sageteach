@@ -70,8 +70,44 @@ export function parseReviewSummaryJson(raw: string): ReviewSummaryPayload | null
 /** Summary extraction can be slower than chat turns; allow enough time for long transcripts. */
 const SUMMARY_TIMEOUT_MS = 55_000;
 
+function extractStreamingJsonStringField(raw: string, field: string): string | undefined {
+  const re = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
+  const m = re.exec(raw);
+  if (!m) return undefined;
+  try {
+    return JSON.parse(`"${m[1]}"`) as string;
+  } catch {
+    return m[1].replace(/\\n/g, "\n").replace(/\\"/g, '"');
+  }
+}
+
+/** Best-effort parse while JSON is still streaming in. */
+export function parsePartialReviewSummaryStream(raw: string): Partial<ReviewSummaryPayload> {
+  const partial: Partial<ReviewSummaryPayload> = {};
+  const subject = extractStreamingJsonStringField(raw, "subject");
+  const weak_point = extractStreamingJsonStringField(raw, "weak_point");
+  const tonight_task = extractStreamingJsonStringField(raw, "tonight_task");
+  const follow_up = extractStreamingJsonStringField(raw, "follow_up");
+  if (subject) partial.subject = subject;
+  if (weak_point) partial.weak_point = weak_point;
+  if (tonight_task) partial.tonight_task = tonight_task;
+  if (follow_up) partial.follow_up = follow_up;
+
+  if (/"mastered"\s*:\s*null/i.test(raw)) {
+    partial.mastered = null;
+  } else {
+    const mastered = extractStreamingJsonStringField(raw, "mastered");
+    if (mastered) partial.mastered = mastered;
+  }
+
+  return partial;
+}
+
 export async function requestReviewSummaryStructured(
   conversation: string,
+  options?: {
+    onDelta?: (textSoFar: string) => void;
+  },
 ): Promise<ReviewSummaryPayload | null> {
   console.log("[review-summary] request", {
     conversationChars: conversation.length,
@@ -85,7 +121,11 @@ export async function requestReviewSummaryStructured(
         { role: "system", content: SUMMARY_SYSTEM },
         { role: "user", content: userContent },
       ],
-      { max_tokens: 2000, timeoutMs: SUMMARY_TIMEOUT_MS },
+      {
+        max_tokens: 2000,
+        timeoutMs: SUMMARY_TIMEOUT_MS,
+        onDelta: options?.onDelta,
+      },
     );
   } catch (e) {
     console.error("[review-summary] DeepSeek request failed", e);

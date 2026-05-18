@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { ArrowRight, Brain, Compass, HeartPulse, LineChart } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
@@ -13,8 +13,25 @@ const features = [
   { icon: Compass, title: "AI 教练", desc: "它记得你上次卡在哪，不会每次都从头问你。" },
 ];
 
+function SessionCheck() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="h-2 w-2 animate-pulse rounded-full bg-muted-foreground/60" aria-hidden />
+    </div>
+  );
+}
+
 function Landing() {
-  const { session } = useAuth();
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return <SessionCheck />;
+  }
+
+  if (session) {
+    return <Navigate to="/app/today" replace />;
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">

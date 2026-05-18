@@ -8,9 +8,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { subjectAccentCardClass, subjectBadgeClass } from "@/lib/subject-accent";
 import {
-  fetchWeakArchive,
   formatArchiveDateLabel,
   persistTaskCompletion,
+  weakArchiveQueryKey,
+  weakArchiveQueryOptions,
   type WeakArchiveRow,
 } from "@/lib/weak-archive";
 
@@ -24,21 +25,23 @@ function ReviewArchive() {
 
   const {
     data: rows = [],
-    isLoading,
+    isPending,
     isError,
   } = useQuery({
-    queryKey: ["weak-point-archive", user?.id],
+    ...weakArchiveQueryOptions(user!.id),
     enabled: !!user?.id,
-    queryFn: () => fetchWeakArchive(user!.id),
+    refetchOnMount: true,
   });
+
+  const showInitialLoading = isPending && rows.length === 0;
 
   const toggleComplete = useCallback(
     async (summaryId: string, completed: boolean) => {
       if (!user?.id) return;
-      const prev = qc.getQueryData<WeakArchiveRow[]>(["weak-point-archive", user.id]);
+      const prev = qc.getQueryData<WeakArchiveRow[]>(weakArchiveQueryKey(user.id));
       if (prev) {
         qc.setQueryData<WeakArchiveRow[]>(
-          ["weak-point-archive", user.id],
+          weakArchiveQueryKey(user.id),
           prev.map((t) => (t.id === summaryId ? { ...t, completed } : t)),
         );
       }
@@ -72,7 +75,7 @@ function ReviewArchive() {
         </p>
       </header>
 
-      {isLoading ? (
+      {showInitialLoading ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : isError ? (
         <p className="text-sm text-destructive">加载失败，请稍后重试。</p>

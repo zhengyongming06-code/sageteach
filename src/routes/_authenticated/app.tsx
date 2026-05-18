@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { Calendar, MessageCircle, LogOut } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/app")({
   component: AppShell,
@@ -17,20 +18,23 @@ function AppShell() {
   const { user, signOut } = useAuth();
   const nav = useNavigate();
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const isReviewChat =
+    path.startsWith("/app/review") && !path.includes("/archive");
 
   useEffect(() => {
     if (!user) return;
-    void supabase
-      .from("profiles")
-      .select("onboarded")
-      .eq("id", user.id)
-      .maybeSingle()
-      .then(({ data }) => {
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from("profiles")
+          .select("onboarded")
+          .eq("id", user.id)
+          .maybeSingle();
         if (data && !data.onboarded) nav({ to: "/onboarding" });
-      })
-      .catch((err) => {
+      } catch (err) {
         console.warn("[app-shell] profile onboarded check failed", err);
-      });
+      }
+    })();
   }, [user, nav]);
 
   useEffect(() => {
@@ -38,7 +42,12 @@ function AppShell() {
   }, [path, nav]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    <div
+      className={cn(
+        "flex flex-col bg-background text-foreground",
+        isReviewChat ? "h-dvh overflow-hidden" : "min-h-screen",
+      )}
+    >
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground md:flex">
         <Link to="/app/today" className="mb-8 flex items-center gap-2.5 px-2">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
@@ -75,28 +84,42 @@ function AppShell() {
         </div>
       </aside>
 
-      <main className="flex min-h-0 flex-1 flex-col md:pl-60">
-        <div className="mx-auto flex min-h-0 max-w-5xl flex-1 flex-col px-5 pb-28 pt-6 md:pb-12 md:pt-10">
+      <main
+        className={cn(
+          "flex min-h-0 flex-1 flex-col md:pl-60",
+          isReviewChat && "overflow-hidden",
+        )}
+      >
+        <div
+          className={cn(
+            "mx-auto flex min-h-0 flex-1 flex-col",
+            isReviewChat
+              ? "h-full max-w-none"
+              : "max-w-5xl px-5 pb-28 pt-6 md:pb-12 md:pt-10",
+          )}
+        >
           <Outlet />
         </div>
       </main>
 
-      <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden">
-        <div className="mx-auto grid max-w-lg grid-cols-2">
-          {tabs.map((t) => {
-            const active = path.startsWith(t.to);
-            const className = `flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
-              active ? "font-medium text-primary" : "text-muted-foreground"
-            }`;
-            return (
-              <Link key={t.to} to={t.to} className={className}>
-                <t.icon className="h-5 w-5" />
-                {t.label}
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
+      {!isReviewChat ? (
+        <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden">
+          <div className="mx-auto grid max-w-lg grid-cols-2">
+            {tabs.map((t) => {
+              const active = path.startsWith(t.to);
+              const className = `flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
+                active ? "font-medium text-primary" : "text-muted-foreground"
+              }`;
+              return (
+                <Link key={t.to} to={t.to} className={className}>
+                  <t.icon className="h-5 w-5" />
+                  {t.label}
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+      ) : null}
     </div>
   );
 }
