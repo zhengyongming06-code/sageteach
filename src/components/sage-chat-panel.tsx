@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Send } from "lucide-react";
@@ -118,13 +118,41 @@ export function SageChatPanel({
   const newBubbleRef = useRef<HTMLDivElement | null>(null);
   const knownMessageIdsRef = useRef<Set<string>>(new Set());
   const [flyingUserMessageId, setFlyingUserMessageId] = useState<string | null>(null);
+  const [pendingUserMessage, setPendingUserMessage] = useState<SageChatMessage | null>(null);
+
+  const displayMessages = useMemo(() => {
+    if (!pendingUserMessage) return messages;
+    const confirmed = messages.some(
+      (m) => m.role === "user" && m.content === pendingUserMessage.content,
+    );
+    if (confirmed) return messages;
+    return [...messages, pendingUserMessage];
+  }, [messages, pendingUserMessage]);
+
   const empty =
-    messages.length === 0 && !isSending && !showHistorySkeleton && streamingAssistantText == null;
+    displayMessages.length === 0 &&
+    !isSending &&
+    !showHistorySkeleton &&
+    streamingAssistantText == null;
+
+  useEffect(() => {
+    if (!pendingUserMessage) return;
+    const confirmed = messages.some(
+      (m) => m.role === "user" && m.content === pendingUserMessage.content,
+    );
+    if (confirmed) {
+      setPendingUserMessage(null);
+      return;
+    }
+    if (!isSending) {
+      setPendingUserMessage(null);
+    }
+  }, [isSending, messages, pendingUserMessage]);
 
   useEffect(() => {
     const known = knownMessageIdsRef.current;
-    const newUserMessages = messages.filter((m) => m.role === "user" && !known.has(m.id));
-    const last = messages[messages.length - 1];
+    const newUserMessages = displayMessages.filter((m) => m.role === "user" && !known.has(m.id));
+    const last = displayMessages[displayMessages.length - 1];
 
     if (
       newUserMessages.length === 1 &&
@@ -134,12 +162,12 @@ export function SageChatPanel({
     ) {
       setFlyingUserMessageId(last.id);
       const clearFly = window.setTimeout(() => setFlyingUserMessageId(null), 150);
-      knownMessageIdsRef.current = new Set(messages.map((m) => m.id));
+      knownMessageIdsRef.current = new Set(displayMessages.map((m) => m.id));
       return () => window.clearTimeout(clearFly);
     }
 
-    knownMessageIdsRef.current = new Set(messages.map((m) => m.id));
-  }, [messages, isSending]);
+    knownMessageIdsRef.current = new Set(displayMessages.map((m) => m.id));
+  }, [displayMessages, isSending]);
 
   useEffect(() => {
     if (!flyingUserMessageId) return;
@@ -160,7 +188,24 @@ export function SageChatPanel({
     requestAnimationFrame(() => {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     });
-  }, [messages, isSending, streamingAssistantText, flyingUserMessageId]);
+  }, [displayMessages, isSending, streamingAssistantText, flyingUserMessageId]);
+
+  const handleSubmit = useCallback(() => {
+    const text = draft.trim();
+    if (!text || isSending) return;
+
+    const optimisticId = `__optimistic_${Date.now()}`;
+    setPendingUserMessage({
+      id: optimisticId,
+      role: "user",
+      content: text,
+      isNew: true,
+    });
+    setFlyingUserMessageId(optimisticId);
+    window.setTimeout(() => setFlyingUserMessageId(null), 150);
+    onDraftChange("");
+    onSubmit();
+  }, [draft, isSending, onDraftChange, onSubmit]);
 
   const showTypingDots =
     isSending && (streamingAssistantText == null || streamingAssistantText === "");
@@ -239,7 +284,7 @@ export function SageChatPanel({
             ))}
           </div>
         )}
-        {messages.map((msg) => {
+        {displayMessages.map((msg) => {
           const isFlyingUser =
             msg.role === "user" && (msg.isNew === true || msg.id === flyingUserMessageId);
           const isUser = msg.role === "user";
@@ -317,7 +362,7 @@ export function SageChatPanel({
             className="flex h-[52px] shrink-0 items-center px-4 py-[10px]"
             onSubmit={(e) => {
               e.preventDefault();
-              onSubmit();
+              handleSubmit();
             }}
           >
             <div className="relative flex min-w-0 flex-1 items-center">
@@ -327,7 +372,7 @@ export function SageChatPanel({
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
-                    onSubmit();
+                    handleSubmit();
                   }
                 }}
                 placeholder={placeholder}
@@ -349,7 +394,7 @@ export function SageChatPanel({
             className="safe-bottom flex shrink-0 items-end gap-2 pb-1 pt-2"
             onSubmit={(e) => {
               e.preventDefault();
-              onSubmit();
+              handleSubmit();
             }}
           >
             <Textarea
@@ -358,7 +403,7 @@ export function SageChatPanel({
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
-                  onSubmit();
+                  handleSubmit();
                 }
               }}
               placeholder={placeholder}
