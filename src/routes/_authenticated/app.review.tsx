@@ -941,11 +941,11 @@ function Review() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 pt-4 md:px-5">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 pt-4 max-lg:gap-2 max-lg:py-2 md:px-5">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight max-lg:text-lg md:text-3xl">Review</h1>
+          <p className="mt-1 text-sm text-muted-foreground max-lg:hidden">
             选一科，和 Sage 聊聊今天哪里卡住——用问题把模糊变成具体。
           </p>
         </div>
@@ -959,8 +959,8 @@ function Review() {
 
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pb-4 md:px-5",
-          "lg:flex-row lg:items-stretch",
+          "flex min-h-0 flex-1 flex-col overflow-hidden",
+          "lg:flex-row lg:items-stretch lg:gap-4 lg:px-5 lg:pb-4",
         )}
       >
         <aside className="hidden shrink-0 border-border lg:block lg:w-56 lg:border-r lg:pr-5">
@@ -1054,7 +1054,26 @@ function Review() {
         </aside>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="shrink-0 space-y-3">
+          <div className="shrink-0 max-lg:flex max-lg:h-11 max-lg:items-center max-lg:gap-2 max-lg:overflow-x-auto max-lg:px-4 max-lg:py-2 lg:hidden">
+            {!onboardingIncomplete &&
+              SUBJECTS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => switchSubject(s)}
+                  className={cn(
+                    "shrink-0 rounded-full border px-3 py-1.5 text-sm font-medium transition",
+                    subject === s
+                      ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                      : "border-border bg-card text-foreground",
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+          </div>
+
+          <div className="shrink-0 space-y-3 max-lg:hidden">
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">科目</p>
             {onboardingIncomplete ? (
@@ -1082,7 +1101,7 @@ function Review() {
             )}
           </div>
 
-          <div className="md:hidden">
+          <div className="hidden lg:block">
             <p className="mb-2 text-xs font-medium text-muted-foreground">
               {mobileSessionOptions.length > 0 ? "复盘场次" : "复盘日期"}
             </p>
@@ -1135,15 +1154,13 @@ function Review() {
           </div>
 
           {!onboardingIncomplete && !hasSessionForSelectedDate && messages.length === 0 && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground max-lg:hidden">
               这是新会话；发第一条消息后，该日期会出现在左侧列表。
             </p>
           )}
           </div>
 
-          <div
-            className="flex min-h-0 min-w-0 flex-1 flex-col max-lg:h-[calc(100dvh-200px)] max-lg:min-h-[400px] lg:h-full lg:min-h-0"
-          >
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden max-lg:px-4 max-lg:pb-2">
             <SageChatPanel
               messages={messages}
               draft={draft}
@@ -1159,7 +1176,6 @@ function Review() {
               placeholder={onboardingIncomplete ? "说说你的感觉…" : `聊聊今天的「${chatSubject}」…`}
               expand
               className="min-h-0 flex-1"
-              style={{ flex: 1, height: "100%" }}
               showHistorySkeleton={showHistorySkeleton}
               streamingAssistantText={streamAssistantText}
               composerHint={

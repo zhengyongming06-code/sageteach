@@ -241,6 +241,13 @@ export function SageChatPanel({
         )}
       </div>
 
+      <div
+        className={cn(
+          "shrink-0",
+          expand &&
+            "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm",
+        )}
+      >
       {betweenScrollAndInput ? <div className="mt-3 shrink-0">{betweenScrollAndInput}</div> : null}
 
       {composerHint ? (
@@ -250,7 +257,7 @@ export function SageChatPanel({
       ) : null}
 
       <form
-        className="safe-bottom mt-3 flex shrink-0 items-end gap-2"
+        className="safe-bottom flex shrink-0 items-end gap-2 pb-1 pt-2"
         onSubmit={(e) => {
           e.preventDefault();
           onSubmit();
@@ -279,6 +286,7 @@ export function SageChatPanel({
       </form>
 
       {belowForm ? <div className="mt-4 shrink-0">{belowForm}</div> : null}
+      </div>
     </div>
   );
 }
