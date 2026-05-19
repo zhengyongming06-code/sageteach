@@ -346,8 +346,9 @@ function Review() {
   }, [subject, onboardingIncomplete, bumpSessionScope, resetChatUiForScopeChange]);
 
   useEffect(() => {
+    if (isSummarySubmitting || summaryInFlightRef.current) return;
     setSessionCard(null);
-  }, [subject, selectedDate, activeSessionSlug]);
+  }, [subject, selectedDate, activeSessionSlug, isSummarySubmitting]);
 
   const { data: hasAnyReviewMessages } = useQuery({
     queryKey: ["review-prior-any", user?.id],
@@ -713,7 +714,11 @@ function Review() {
   }, []);
 
   const runSilentSummary = useCallback(async () => {
-    if (!user?.id || !activeSessionSlug) return;
+    if (!user?.id || !activeSessionSlug) {
+      setIsSummarySubmitting(false);
+      setIsEndingReview(false);
+      return;
+    }
     if (summaryInFlightRef.current) return;
     const key = activeSessionSlug;
     if (summaryDoneKeysRef.current.has(key)) return;
@@ -768,8 +773,7 @@ function Review() {
         return;
       }
       if (slugResolveGenRef.current !== summaryGen) {
-        setIsSummarySubmitting(false);
-        setIsEndingReview(false);
+        failSummary("生成失败，点击重试");
         return;
       }
 
@@ -835,6 +839,17 @@ function Review() {
       });
       clearSummaryStreamTimeout();
       if (summaryStreamRaf) cancelAnimationFrame(summaryStreamRaf);
+      if (pendingSummaryStream) {
+        const partial = parsePartialReviewSummaryStream(pendingSummaryStream);
+        setSessionCard({
+          kind: "streaming",
+          subject: partial.subject,
+          weak_point: partial.weak_point,
+          tonight_task: partial.tonight_task,
+          follow_up: partial.follow_up,
+          mastered: partial.mastered,
+        });
+      }
       if (!parsed) throw new Error("parse");
 
       const row = buildReviewSummaryInsertRow({
@@ -1134,7 +1149,6 @@ function Review() {
     if (!activeSessionSlug) return;
     if (summaryDoneKeysRef.current.has(activeSessionSlug)) return;
 
-    summaryDoneKeysRef.current.add(activeSessionSlug);
     setSubjectsWithEndedReview((prev) => new Set(prev).add(chatSubject));
     setIsSummarySubmitting(true);
     setIsEndingReview(true);
