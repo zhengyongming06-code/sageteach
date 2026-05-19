@@ -75,6 +75,46 @@ function isUnknownColumnError(error: { code?: string; message?: string }): boole
   return error.code === "PGRST204" || /Could not find the .* column/i.test(error.message ?? "");
 }
 
+export type ExistingReviewSummaryRow = {
+  id: string;
+  subject: string;
+  weak_point: string;
+  tonight_task: string;
+  follow_up: string;
+  mastered: string | null;
+};
+
+/** Return existing summary for this session slug, if any (prevents duplicate inserts). */
+export async function findExistingReviewSummary(
+  reviewSessionSlug: string,
+  client: SupabaseClient<Database> = supabase,
+): Promise<ExistingReviewSummaryRow | null> {
+  if (!reviewSessionSlug || !UUID_RE.test(reviewSessionSlug)) return null;
+
+  const userId = await requireAuthenticatedUserId(client);
+  const { data, error } = await client
+    .from("review_summaries")
+    .select("id,subject,weak_point,tonight_task,follow_up,mastered")
+    .eq("user_id", userId)
+    .eq("review_session_slug", reviewSessionSlug)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[review-summary] findExistingReviewSummary", error);
+    return null;
+  }
+  if (!data?.id) return null;
+
+  return {
+    id: data.id,
+    subject: data.subject,
+    weak_point: data.weak_point,
+    tonight_task: data.tonight_task,
+    follow_up: data.follow_up,
+    mastered: data.mastered,
+  };
+}
+
 /**
  * Insert into review_summaries using the shared authenticated Supabase client.
  */
@@ -93,6 +133,14 @@ export async function persistReviewSummary(
 
   if (!row.session_date) {
     throw new Error("review_summaries insert: session_date is required");
+  }
+
+  if (row.review_session_slug && UUID_RE.test(row.review_session_slug)) {
+    const existing = await findExistingReviewSummary(row.review_session_slug, client);
+    if (existing?.id) {
+      console.log("[review-summary] skip duplicate insert; existing row", existing);
+      return { id: existing.id };
+    }
   }
 
   console.log("[review-summary] insert payload", row);
@@ -124,6 +172,8 @@ export async function persistReviewSummary(
   if (!data?.id) {
     throw new Error("review_summaries insert returned no id");
   }
+
+  console.log("[review-summary] insert succeeded", { id: data.id, subject: row.subject });
 
   return { id: data.id };
 }

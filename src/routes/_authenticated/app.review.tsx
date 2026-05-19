@@ -50,7 +50,11 @@ import {
   parsePartialReviewSummaryStream,
   requestReviewSummaryStructured,
 } from "@/lib/review-summary";
-import { buildReviewSummaryInsertRow, persistReviewSummary } from "@/lib/review-summary-db";
+import {
+  buildReviewSummaryInsertRow,
+  findExistingReviewSummary,
+  persistReviewSummary,
+} from "@/lib/review-summary-db";
 import { logSupabaseError } from "@/lib/supabase-errors";
 import type { PostgrestError } from "@supabase/supabase-js";
 
@@ -162,10 +166,12 @@ function createChatsBySubject(): Record<string, SubjectChatCache> {
 }
 
 const SPRINT_EXAM_MAX_DAYS = 30;
+const SUMMARY_STREAM_TIMEOUT_MS = 10_000;
 
 type SessionCardState =
   | null
   | { kind: "loading" }
+  | { kind: "error"; message: string }
   | {
       kind: "streaming";
       subject?: string;
@@ -194,7 +200,12 @@ function Review() {
   const [streamAssistantText, setStreamAssistantText] = useState<string | null>(null);
   const [sessionCard, setSessionCard] = useState<SessionCardState>(null);
   const [isEndingReview, setIsEndingReview] = useState(false);
+  const [isSummarySubmitting, setIsSummarySubmitting] = useState(false);
+  const [subjectsWithEndedReview, setSubjectsWithEndedReview] = useState<Set<string>>(
+    () => new Set(),
+  );
   const summaryDoneKeysRef = useRef(new Set<string>());
+  const summaryStreamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openingFlightRef = useRef(false);
   const subjectRef = useRef(subject);
   const selectedDateRef = useRef(selectedDate);
@@ -446,8 +457,15 @@ function Review() {
           const subj = row.review_subject;
           const ca = row.created_at;
           if (!sl || !d || !subj || !ca) continue;
-          if (!bySlug.has(sl)) {
+          const prev = bySlug.get(sl);
+          if (!prev) {
             bySlug.set(sl, { session_date: d, subject: subj, started_at: ca });
+          } else {
+            bySlug.set(sl, {
+              session_date: d,
+              subject: subj,
+              started_at: prev.started_at,
+            });
           }
         }
         const list: SessionRow[] = [...bySlug.entries()].map(([session_slug, v]) => ({
@@ -578,12 +596,14 @@ function Review() {
     (nextSubject: string) => {
       if (onboardingIncomplete || nextSubject === subject) return;
 
-      chatsBySubject.current[subject] = {
-        messages,
-        messageRows,
-        activeSessionSlug,
-        selectedDate,
-      };
+      chatsBySubject.current[subject] = subjectsWithEndedReview.has(subject)
+        ? emptySubjectChatCache()
+        : {
+            messages,
+            messageRows,
+            activeSessionSlug,
+            selectedDate,
+          };
 
       const cached = chatsBySubject.current[nextSubject] ?? emptySubjectChatCache();
       let slug = cached.activeSessionSlug;
@@ -615,6 +635,7 @@ function Review() {
       sessionIndex,
       resetChatUiForScopeChange,
       onboardingIncomplete,
+      subjectsWithEndedReview,
       user?.id,
       qc,
     ],
@@ -639,6 +660,13 @@ function Review() {
     [sessionIndex],
   );
 
+  const clearSummaryStreamTimeout = useCallback(() => {
+    if (summaryStreamTimeoutRef.current) {
+      clearTimeout(summaryStreamTimeoutRef.current);
+      summaryStreamTimeoutRef.current = null;
+    }
+  }, []);
+
   const runSilentSummary = useCallback(async () => {
     if (!user?.id || !activeSessionSlug) return;
     const key = activeSessionSlug;
@@ -648,53 +676,86 @@ function Review() {
     const summarySubject = chatSubject;
     const summaryGen = slugResolveGenRef.current;
 
-    const { data: histRows, error: histErr } = await supabase
-      .from("coach_messages")
-      .select("role,content,review_session_slug,review_subject")
-      .eq("user_id", user.id)
-      .eq("review_session_slug", summarySlug)
-      .eq("review_subject", summarySubject)
-      .in("role", ["user", "assistant"])
-      .order("created_at", { ascending: true });
-    if (histErr) {
-      console.warn("[review-summary] history fetch", histErr);
-      setSessionCard(null);
-      setIsEndingReview(false);
-      return;
-    }
-    if (slugResolveGenRef.current !== summaryGen) {
-      setSessionCard(null);
-      setIsEndingReview(false);
-      return;
-    }
-    const historyRows = filterCoachMessagesForSession(
-      histRows ?? [],
-      summarySlug,
-      summarySubject,
-    );
-
-    const transcript = formatReviewConversationForSummary(historyRows);
-    if (!transcript.trim()) {
-      setSessionCard(null);
-      setIsEndingReview(false);
-      return;
-    }
-
-    summaryDoneKeysRef.current.add(key);
-    setSessionCard({ kind: "streaming" });
-
-    const wasGuidedFirst = onboardingIncomplete;
+    const failSummary = (message: string) => {
+      clearSummaryStreamTimeout();
+      summaryDoneKeysRef.current.delete(key);
+      setSessionCard({ kind: "error", message });
+    };
 
     try {
+      const existing = await findExistingReviewSummary(summarySlug, supabase);
+      if (existing) {
+        console.log("[review-summary] loaded existing summary for session", {
+          sessionSlug: summarySlug,
+          subject: existing.subject,
+        });
+        summaryDoneKeysRef.current.add(key);
+        setSessionCard({
+          kind: "full",
+          subject: existing.subject,
+          weak_point: existing.weak_point,
+          tonight_task: existing.tonight_task,
+          follow_up: existing.follow_up,
+          mastered: existing.mastered,
+        });
+        setSubjectsWithEndedReview((prev) => new Set(prev).add(summarySubject));
+        return;
+      }
+
+      const { data: histRows, error: histErr } = await supabase
+        .from("coach_messages")
+        .select("role,content,review_session_slug,review_subject")
+        .eq("user_id", user.id)
+        .eq("review_session_slug", summarySlug)
+        .eq("review_subject", summarySubject)
+        .in("role", ["user", "assistant"])
+        .order("created_at", { ascending: true });
+      if (histErr) {
+        console.error("[review-summary] history fetch failed", histErr);
+        failSummary("生成失败，点击重试");
+        return;
+      }
+      if (slugResolveGenRef.current !== summaryGen) {
+        setIsSummarySubmitting(false);
+        setIsEndingReview(false);
+        return;
+      }
+
+      const historyRows = filterCoachMessagesForSession(
+        histRows ?? [],
+        summarySlug,
+        summarySubject,
+      );
+
+      const transcript = formatReviewConversationForSummary(historyRows);
+      if (!transcript.trim()) {
+        failSummary("生成失败，点击重试");
+        return;
+      }
+
+      summaryDoneKeysRef.current.add(key);
+      setSessionCard({ kind: "loading" });
+
+      clearSummaryStreamTimeout();
+      summaryStreamTimeoutRef.current = setTimeout(() => {
+        console.warn("[review-summary] stream timeout", { sessionSlug: summarySlug });
+        failSummary("生成失败，点击重试");
+      }, SUMMARY_STREAM_TIMEOUT_MS);
+
+      const wasGuidedFirst = onboardingIncomplete;
+
       if (import.meta.env.DEV) {
         console.log("[review-summary] runSilentSummary", {
           key,
+          summarySubject,
           messageCount: historyRows.length,
           transcriptChars: transcript.length,
         });
       }
+
       let summaryStreamRaf = 0;
       let pendingSummaryStream = "";
+      let streamStarted = false;
       const flushSummaryStreamToUi = () => {
         summaryStreamRaf = 0;
         const partial = parsePartialReviewSummaryStream(pendingSummaryStream);
@@ -710,27 +771,37 @@ function Review() {
 
       const parsed = await requestReviewSummaryStructured(transcript, {
         onDelta: (full) => {
+          if (!streamStarted) {
+            streamStarted = true;
+            clearSummaryStreamTimeout();
+          }
           pendingSummaryStream = full;
           if (!summaryStreamRaf) {
             summaryStreamRaf = requestAnimationFrame(flushSummaryStreamToUi);
           }
         },
       });
+      clearSummaryStreamTimeout();
       if (summaryStreamRaf) cancelAnimationFrame(summaryStreamRaf);
       if (!parsed) throw new Error("parse");
-      const subjectLabel = parsed.subject.trim() || chatSubject;
+
       const row = buildReviewSummaryInsertRow({
         userId: user.id,
         sessionDate: selectedDate,
-        subject: subjectLabel,
+        subject: summarySubject,
         parsed,
-        reviewSessionSlug: activeSessionSlug,
+        reviewSessionSlug: summarySlug,
       });
-      await persistReviewSummary(row, supabase);
+      const { id: summaryId } = await persistReviewSummary(row, supabase);
+      console.log("[review-summary] saved", {
+        id: summaryId,
+        sessionSlug: summarySlug,
+        subject: summarySubject,
+      });
 
       setSessionCard({
         kind: "full",
-        subject: subjectLabel,
+        subject: summarySubject,
         weak_point: parsed.weak_point,
         tonight_task: parsed.tonight_task,
         follow_up: parsed.follow_up,
@@ -751,11 +822,11 @@ function Review() {
         user_id: user.id,
         role: "assistant",
         content: closingContent,
-        review_subject: chatSubject,
+        review_subject: summarySubject,
         review_session_date: selectedDate,
-        review_session_slug: activeSessionSlug,
+        review_session_slug: summarySlug,
       });
-      if (closingErr) console.error(closingErr);
+      if (closingErr) console.error("[review-summary] closing message insert", closingErr);
 
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["review-summaries", user.id] }),
@@ -765,40 +836,52 @@ function Review() {
         qc.invalidateQueries({ queryKey: ["today-sage-hook", user.id] }),
         qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] }),
         qc.invalidateQueries({
-          queryKey: ["review-messages", user.id, activeSessionSlug, chatSubject],
+          queryKey: ["review-messages", user.id, summarySlug, summarySubject],
         }),
         qc.invalidateQueries({ queryKey: ["profile-flags", user.id] }),
         qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
       ]);
       window.dispatchEvent(new CustomEvent("sage-weak-archive-refresh"));
 
+      await qc.refetchQueries({ queryKey: ["review-sessions-index", user.id] });
+      const indexAfter = qc.getQueryData<SessionRow[]>(["review-sessions-index", user.id]);
+      console.log("[review-summary] session index after save", {
+        subject: summarySubject,
+        sessionSlug: summarySlug,
+        totalSessions: indexAfter?.length ?? 0,
+        mathSessions: indexAfter?.filter((s) => s.subject === "数学").length ?? 0,
+      });
+
       if (!wasGuidedFirst) {
-        chatsBySubject.current[summarySubject] = emptySubjectChatCache();
-        bumpSessionScope();
-        setActiveSessionSlug(null);
-        setSelectedDate(localYmd());
+        setSubjectsWithEndedReview((prev) => new Set(prev).add(summarySubject));
       }
     } catch (e) {
       summaryDoneKeysRef.current.delete(key);
-      setSessionCard(null);
       const pg = e as PostgrestError;
       if (pg?.code && pg?.message) {
-        logSupabaseError("review-summary runSilentSummary", pg, {
-          key,
-          transcriptChars: transcript.length,
-        });
+        logSupabaseError("review-summary runSilentSummary", pg, { key });
       } else {
         console.error("[review-summary] runSilentSummary failed", {
           key,
-          transcriptChars: transcript.length,
           message: e instanceof Error ? e.message : String(e),
           error: e,
         });
       }
+      failSummary("生成失败，点击重试");
     } finally {
+      clearSummaryStreamTimeout();
+      setIsSummarySubmitting(false);
       setIsEndingReview(false);
     }
-  }, [chatSubject, selectedDate, user, qc, onboardingIncomplete, activeSessionSlug]);
+  }, [
+    chatSubject,
+    selectedDate,
+    user,
+    qc,
+    onboardingIncomplete,
+    activeSessionSlug,
+    clearSummaryStreamTimeout,
+  ]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -983,11 +1066,23 @@ function Review() {
   ]);
 
   const onEndReviewClick = useCallback(() => {
-    if (userMessageCount < 3 || isEndingReview) return;
-    setSessionCard({ kind: "loading" });
+    if (userMessageCount < 3 || isSummarySubmitting || subjectsWithEndedReview.has(chatSubject)) {
+      return;
+    }
+    setIsSummarySubmitting(true);
     setIsEndingReview(true);
+    setSessionCard({ kind: "loading" });
     void runSilentSummary();
-  }, [userMessageCount, runSilentSummary, isEndingReview]);
+  }, [userMessageCount, runSilentSummary, isSummarySubmitting, subjectsWithEndedReview, chatSubject]);
+
+  const onRetrySummary = useCallback(() => {
+    if (!activeSessionSlug || isSummarySubmitting) return;
+    summaryDoneKeysRef.current.delete(activeSessionSlug);
+    setIsSummarySubmitting(true);
+    setIsEndingReview(true);
+    setSessionCard({ kind: "loading" });
+    void runSilentSummary();
+  }, [activeSessionSlug, isSummarySubmitting, runSilentSummary]);
 
   const startTodaySession = useCallback(async () => {
     const today = localYmd();
@@ -1060,9 +1155,27 @@ function Review() {
     }
   }, [user?.id, deleteDialogSession, qc, sessionIndex, activeSessionSlug]);
 
+  const showEndReviewButton =
+    userMessageCount >= 3 &&
+    !subjectsWithEndedReview.has(chatSubject) &&
+    !isSummarySubmitting;
+
   const summaryBelow =
     sessionCard?.kind === "loading" ? (
       <ReviewSummaryCard variant="skeleton" />
+    ) : sessionCard?.kind === "error" ? (
+      <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+        <p className="text-destructive">{sessionCard.message}</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-3 w-full rounded-xl"
+          onClick={onRetrySummary}
+        >
+          重试
+        </Button>
+      </div>
     ) : sessionCard?.kind === "streaming" ? (
       <ReviewSummaryCard
         variant="streaming"
@@ -1103,16 +1216,16 @@ function Review() {
       streamingAssistantText={streamAssistantText}
       composerHint={chatRetrying ? "重试中…" : null}
       betweenScrollAndInput={
-        userMessageCount >= 3 ? (
+        showEndReviewButton ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
             className="w-full rounded-xl border-dashed"
-            disabled={isEndingReview}
+            disabled={isSummarySubmitting}
             onClick={onEndReviewClick}
           >
-            {isEndingReview ? "正在生成小结…" : "结束复盘"}
+            {isSummarySubmitting ? "生成中..." : "结束复盘"}
           </Button>
         ) : null
       }
