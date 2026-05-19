@@ -147,27 +147,6 @@ function groupSessionsForDrawer(rows: SessionRow[]) {
 
 type SidebarSessionFilter = "全部" | Subject;
 
-type SubjectChatCache = {
-  messages: SageChatMessage[];
-  messageRows: CoachMessageRow[];
-  activeSessionSlug: string | null;
-  selectedDate: string;
-};
-
-function emptySubjectChatCache(): SubjectChatCache {
-  return { messages: [], messageRows: [], activeSessionSlug: null, selectedDate: localYmd() };
-}
-
-function createChatsBySubject(): Record<string, SubjectChatCache> {
-  return Object.fromEntries(SUBJECTS.map((s) => [s, emptySubjectChatCache()])) as Record<
-    string,
-    SubjectChatCache
-  >;
-}
-
-const SPRINT_EXAM_MAX_DAYS = 30;
-const SUMMARY_STREAM_TIMEOUT_MS = 10_000;
-
 type SessionCardState =
   | null
   | { kind: "loading" }
@@ -189,6 +168,34 @@ type SessionCardState =
       mastered: string | null;
     };
 
+type SubjectChatCache = {
+  messages: SageChatMessage[];
+  messageRows: CoachMessageRow[];
+  activeSessionSlug: string | null;
+  selectedDate: string;
+  sessionCard: SessionCardState;
+};
+
+function emptySubjectChatCache(): SubjectChatCache {
+  return {
+    messages: [],
+    messageRows: [],
+    activeSessionSlug: null,
+    selectedDate: localYmd(),
+    sessionCard: null,
+  };
+}
+
+function createChatsBySubject(): Record<string, SubjectChatCache> {
+  return Object.fromEntries(SUBJECTS.map((s) => [s, emptySubjectChatCache()])) as Record<
+    string,
+    SubjectChatCache
+  >;
+}
+
+const SPRINT_EXAM_MAX_DAYS = 30;
+const SUMMARY_STREAM_TIMEOUT_MS = 10_000;
+
 function Review() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -207,6 +214,12 @@ function Review() {
   const summaryDoneKeysRef = useRef(new Set<string>());
   const summaryInFlightRef = useRef(false);
   const summaryStreamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Pins the summary card to a session; cleared only on subject switch or scope change. */
+  const summaryCardScopeRef = useRef<{
+    subject: string;
+    sessionDate: string;
+    sessionSlug: string;
+  } | null>(null);
   const openingFlightRef = useRef(false);
   const subjectRef = useRef(subject);
   const selectedDateRef = useRef(selectedDate);
@@ -345,10 +358,33 @@ function Review() {
     setSelectedDate(localYmd());
   }, [subject, onboardingIncomplete, bumpSessionScope, resetChatUiForScopeChange]);
 
+  const pinSummaryCardScope = useCallback(
+    (scopeSubject: string, sessionDate: string, sessionSlug: string) => {
+      summaryCardScopeRef.current = {
+        subject: scopeSubject,
+        sessionDate,
+        sessionSlug,
+      };
+    },
+    [],
+  );
+
+  /** Clear summary only when leaving the pinned session scope (not when submit finishes). */
   useEffect(() => {
-    if (isSummarySubmitting || summaryInFlightRef.current) return;
+    const pinned = summaryCardScopeRef.current;
+    if (!pinned) return;
+
+    const scopeSubject = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subject;
+    const sameScope =
+      pinned.subject === scopeSubject &&
+      pinned.sessionDate === selectedDate &&
+      pinned.sessionSlug === activeSessionSlug;
+
+    if (sameScope) return;
+
+    summaryCardScopeRef.current = null;
     setSessionCard(null);
-  }, [subject, selectedDate, activeSessionSlug, isSummarySubmitting]);
+  }, [subject, selectedDate, activeSessionSlug, onboardingIncomplete]);
 
   const { data: hasAnyReviewMessages } = useQuery({
     queryKey: ["review-prior-any", user?.id],
@@ -605,13 +641,17 @@ function Review() {
       messageRows,
       activeSessionSlug,
       selectedDate,
+      sessionCard,
     };
-  }, [messages, messageRows, activeSessionSlug, selectedDate, subject, onboardingIncomplete]);
+  }, [messages, messageRows, activeSessionSlug, selectedDate, subject, onboardingIncomplete, sessionCard]);
 
   /** Save current subject chat, restore cached session/messages for the next subject. */
   const switchSubject = useCallback(
     (nextSubject: string) => {
       if (onboardingIncomplete || nextSubject === subject) return;
+
+      summaryCardScopeRef.current = null;
+      setSessionCard(null);
 
       chatsBySubject.current[subject] = subjectsWithEndedReview.has(subject)
         ? emptySubjectChatCache()
@@ -620,6 +660,7 @@ function Review() {
             messageRows,
             activeSessionSlug,
             selectedDate,
+            sessionCard,
           };
 
       const returningAfterEndedReview = subjectsWithEndedReview.has(nextSubject);
@@ -628,12 +669,14 @@ function Review() {
         const today = localYmd();
         bumpSessionScope();
         resetChatUiForScopeChange();
+        summaryCardScopeRef.current = null;
         setSessionCard(null);
         chatsBySubject.current[nextSubject] = {
           messages: [],
           messageRows: [],
           activeSessionSlug: freshSlug,
           selectedDate: today,
+          sessionCard: null,
         };
         setSubjectsWithEndedReview((prev) => {
           const next = new Set(prev);
@@ -670,6 +713,13 @@ function Review() {
       if (user?.id && slug && cached.messageRows.length > 0) {
         qc.setQueryData(["review-messages", user.id, slug, nextSubject], cached.messageRows);
       }
+
+      if (cached.sessionCard && cached.activeSessionSlug === slug) {
+        setSessionCard(cached.sessionCard);
+        if (cached.activeSessionSlug) {
+          pinSummaryCardScope(nextSubject, date, cached.activeSessionSlug);
+        }
+      }
     },
     [
       subject,
@@ -677,11 +727,13 @@ function Review() {
       messageRows,
       activeSessionSlug,
       selectedDate,
+      sessionCard,
       sessionIndex,
       bumpSessionScope,
       resetChatUiForScopeChange,
       onboardingIncomplete,
       subjectsWithEndedReview,
+      pinSummaryCardScope,
       user?.id,
       qc,
     ],
@@ -731,6 +783,7 @@ function Review() {
     const failSummary = (message: string) => {
       clearSummaryStreamTimeout();
       summaryDoneKeysRef.current.delete(key);
+      summaryCardScopeRef.current = null;
       setSubjectsWithEndedReview((prev) => {
         const next = new Set(prev);
         next.delete(summarySubject);
@@ -755,6 +808,7 @@ function Review() {
           follow_up: existing.follow_up,
           mastered: existing.mastered,
         });
+        pinSummaryCardScope(summarySubject, selectedDate, summarySlug);
         setSubjectsWithEndedReview((prev) => new Set(prev).add(summarySubject));
         return;
       }
@@ -874,6 +928,7 @@ function Review() {
         follow_up: parsed.follow_up,
         mastered: parsed.mastered,
       });
+      pinSummaryCardScope(summarySubject, selectedDate, summarySlug);
 
       const { error: profileErr } = await supabase
         .from("profiles")
@@ -953,6 +1008,7 @@ function Review() {
     onboardingIncomplete,
     activeSessionSlug,
     clearSummaryStreamTimeout,
+    pinSummaryCardScope,
   ]);
 
   const send = useCallback(async () => {
