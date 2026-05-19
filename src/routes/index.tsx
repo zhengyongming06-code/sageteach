@@ -89,11 +89,13 @@ function Landing() {
           ))}
         </section>
 
-        <section className="mt-20 w-full rounded-3xl border border-border bg-warm px-8 py-10 sm:px-12 sm:py-12">
-          <p className="text-balance font-serif text-xl leading-relaxed text-warm-foreground sm:text-2xl">
+        <section className="mt-20 w-full rounded-3xl border border-border bg-warm px-8 py-10 sm:px-12 sm:py-12 max-lg:rounded-2xl max-lg:!p-6">
+          <p className="text-balance font-serif text-xl leading-relaxed text-warm-foreground max-lg:text-[18px] max-lg:leading-[1.6] max-lg:tracking-[0.02em] sm:text-2xl">
             成功就是做那些常人坚持不下去的事情，不断突破和超越自己
           </p>
-          <p className="mt-4 text-right text-base italic leading-relaxed text-muted-foreground/80">— Simon</p>
+          <p className="mt-4 text-right text-base italic leading-relaxed text-muted-foreground/80 max-lg:mt-4 max-lg:text-[13px] max-lg:text-muted-foreground/60">
+            — Simon
+          </p>
         </section>
       </main>
 
