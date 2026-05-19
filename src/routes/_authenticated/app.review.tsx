@@ -205,6 +205,7 @@ function Review() {
     () => new Set(),
   );
   const summaryDoneKeysRef = useRef(new Set<string>());
+  const summaryInFlightRef = useRef(false);
   const summaryStreamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openingFlightRef = useRef(false);
   const subjectRef = useRef(subject);
@@ -447,33 +448,48 @@ function Review() {
           console.warn("[review-sessions-index]", error);
           return [];
         }
-        const bySlug = new Map<
+        const byKey = new Map<
           string,
-          { session_date: string; subject: string; started_at: string }
+          { session_slug: string; session_date: string; subject: string; started_at: string }
         >();
+        const indexKey = (slug: string, subj: string) => `${slug}\0${subj}`;
         for (const row of data ?? []) {
           const sl = row.review_session_slug;
           const d = row.review_session_date;
           const subj = row.review_subject;
           const ca = row.created_at;
           if (!sl || !d || !subj || !ca) continue;
-          const prev = bySlug.get(sl);
+          const k = indexKey(sl, subj);
+          const prev = byKey.get(k);
           if (!prev) {
-            bySlug.set(sl, { session_date: d, subject: subj, started_at: ca });
+            byKey.set(k, { session_slug: sl, session_date: d, subject: subj, started_at: ca });
           } else {
-            bySlug.set(sl, {
-              session_date: d,
+            byKey.set(k, { ...prev, session_date: d });
+          }
+        }
+        const { data: summaryRows, error: sumErr } = await supabase
+          .from("review_summaries")
+          .select("review_session_slug,session_date,subject,created_at")
+          .eq("user_id", user!.id)
+          .not("review_session_slug", "is", null);
+        if (sumErr) {
+          console.warn("[review-sessions-index] summaries", sumErr);
+        } else {
+          for (const sum of summaryRows ?? []) {
+            const sl = sum.review_session_slug;
+            const subj = sum.subject;
+            if (!sl || !subj) continue;
+            const k = indexKey(sl, subj);
+            const prev = byKey.get(k);
+            byKey.set(k, {
+              session_slug: sl,
+              session_date: sum.session_date ?? prev?.session_date ?? localYmd(),
               subject: subj,
-              started_at: prev.started_at,
+              started_at: prev?.started_at ?? sum.created_at,
             });
           }
         }
-        const list: SessionRow[] = [...bySlug.entries()].map(([session_slug, v]) => ({
-          session_slug,
-          session_date: v.session_date,
-          subject: v.subject,
-          started_at: v.started_at,
-        }));
+        const list: SessionRow[] = [...byKey.values()];
         list.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
         return list;
       } catch (e) {
@@ -605,6 +621,34 @@ function Review() {
             selectedDate,
           };
 
+      const returningAfterEndedReview = subjectsWithEndedReview.has(nextSubject);
+      if (returningAfterEndedReview) {
+        const freshSlug = crypto.randomUUID();
+        const today = localYmd();
+        bumpSessionScope();
+        resetChatUiForScopeChange();
+        setSessionCard(null);
+        chatsBySubject.current[nextSubject] = {
+          messages: [],
+          messageRows: [],
+          activeSessionSlug: freshSlug,
+          selectedDate: today,
+        };
+        setSubjectsWithEndedReview((prev) => {
+          const next = new Set(prev);
+          next.delete(nextSubject);
+          return next;
+        });
+        skipSubjectScopeEffectRef.current = true;
+        setSubject(nextSubject);
+        setSelectedDate(today);
+        setActiveSessionSlug(freshSlug);
+        if (user?.id) {
+          qc.setQueryData(["review-messages", user.id, freshSlug, nextSubject], []);
+        }
+        return;
+      }
+
       const cached = chatsBySubject.current[nextSubject] ?? emptySubjectChatCache();
       let slug = cached.activeSessionSlug;
       let date = cached.selectedDate;
@@ -633,6 +677,7 @@ function Review() {
       activeSessionSlug,
       selectedDate,
       sessionIndex,
+      bumpSessionScope,
       resetChatUiForScopeChange,
       onboardingIncomplete,
       subjectsWithEndedReview,
@@ -669,9 +714,11 @@ function Review() {
 
   const runSilentSummary = useCallback(async () => {
     if (!user?.id || !activeSessionSlug) return;
+    if (summaryInFlightRef.current) return;
     const key = activeSessionSlug;
     if (summaryDoneKeysRef.current.has(key)) return;
 
+    summaryInFlightRef.current = true;
     const summarySlug = activeSessionSlug;
     const summarySubject = chatSubject;
     const summaryGen = slugResolveGenRef.current;
@@ -679,6 +726,11 @@ function Review() {
     const failSummary = (message: string) => {
       clearSummaryStreamTimeout();
       summaryDoneKeysRef.current.delete(key);
+      setSubjectsWithEndedReview((prev) => {
+        const next = new Set(prev);
+        next.delete(summarySubject);
+        return next;
+      });
       setSessionCard({ kind: "error", message });
     };
 
@@ -817,16 +869,20 @@ function Review() {
       const closingContent = wasGuidedFirst
         ? POST_FIRST_ONBOARDING_SESSION_CLOSING
         : POST_REVIEW_SESSION_CLOSING;
-
-      const { error: closingErr } = await supabase.from("coach_messages").insert({
-        user_id: user.id,
-        role: "assistant",
-        content: closingContent,
-        review_subject: summarySubject,
-        review_session_date: selectedDate,
-        review_session_slug: summarySlug,
-      });
-      if (closingErr) console.error("[review-summary] closing message insert", closingErr);
+      const alreadyHasClosing = historyRows.some(
+        (m) => m.role === "assistant" && m.content === closingContent,
+      );
+      if (!alreadyHasClosing) {
+        const { error: closingErr } = await supabase.from("coach_messages").insert({
+          user_id: user.id,
+          role: "assistant",
+          content: closingContent,
+          review_subject: summarySubject,
+          review_session_date: selectedDate,
+          review_session_slug: summarySlug,
+        });
+        if (closingErr) console.error("[review-summary] closing message insert", closingErr);
+      }
 
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["review-summaries", user.id] }),
@@ -869,6 +925,7 @@ function Review() {
       }
       failSummary("生成失败，点击重试");
     } finally {
+      summaryInFlightRef.current = false;
       clearSummaryStreamTimeout();
       setIsSummarySubmitting(false);
       setIsEndingReview(false);
@@ -1066,23 +1123,45 @@ function Review() {
   ]);
 
   const onEndReviewClick = useCallback(() => {
-    if (userMessageCount < 3 || isSummarySubmitting || subjectsWithEndedReview.has(chatSubject)) {
+    if (
+      userMessageCount < 3 ||
+      isSummarySubmitting ||
+      summaryInFlightRef.current ||
+      subjectsWithEndedReview.has(chatSubject)
+    ) {
       return;
     }
+    if (!activeSessionSlug) return;
+    if (summaryDoneKeysRef.current.has(activeSessionSlug)) return;
+
+    summaryDoneKeysRef.current.add(activeSessionSlug);
+    setSubjectsWithEndedReview((prev) => new Set(prev).add(chatSubject));
     setIsSummarySubmitting(true);
     setIsEndingReview(true);
     setSessionCard({ kind: "loading" });
     void runSilentSummary();
-  }, [userMessageCount, runSilentSummary, isSummarySubmitting, subjectsWithEndedReview, chatSubject]);
+  }, [
+    userMessageCount,
+    runSilentSummary,
+    isSummarySubmitting,
+    subjectsWithEndedReview,
+    chatSubject,
+    activeSessionSlug,
+  ]);
 
   const onRetrySummary = useCallback(() => {
-    if (!activeSessionSlug || isSummarySubmitting) return;
+    if (!activeSessionSlug || isSummarySubmitting || summaryInFlightRef.current) return;
     summaryDoneKeysRef.current.delete(activeSessionSlug);
+    setSubjectsWithEndedReview((prev) => {
+      const next = new Set(prev);
+      next.delete(chatSubject);
+      return next;
+    });
     setIsSummarySubmitting(true);
     setIsEndingReview(true);
     setSessionCard({ kind: "loading" });
     void runSilentSummary();
-  }, [activeSessionSlug, isSummarySubmitting, runSilentSummary]);
+  }, [activeSessionSlug, isSummarySubmitting, runSilentSummary, chatSubject]);
 
   const startTodaySession = useCallback(async () => {
     const today = localYmd();

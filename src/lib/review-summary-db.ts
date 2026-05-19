@@ -159,6 +159,7 @@ export async function persistReviewSummary(
       weak_point: row.weak_point,
       tonight_task: row.tonight_task,
       follow_up: row.follow_up,
+      ...(row.review_session_slug ? { review_session_slug: row.review_session_slug } : {}),
     };
     console.warn("[review-summary] retry insert without optional columns", minimal);
     ({ data, error } = await attemptInsert(minimal));
