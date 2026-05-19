@@ -143,6 +143,24 @@ function groupSessionsForDrawer(rows: SessionRow[]) {
 
 type SidebarSessionFilter = "全部" | Subject;
 
+type SubjectChatCache = {
+  messages: SageChatMessage[];
+  messageRows: CoachMessageRow[];
+  activeSessionSlug: string | null;
+  selectedDate: string;
+};
+
+function emptySubjectChatCache(): SubjectChatCache {
+  return { messages: [], messageRows: [], activeSessionSlug: null, selectedDate: localYmd() };
+}
+
+function createChatsBySubject(): Record<string, SubjectChatCache> {
+  return Object.fromEntries(SUBJECTS.map((s) => [s, emptySubjectChatCache()])) as Record<
+    string,
+    SubjectChatCache
+  >;
+}
+
 const SPRINT_EXAM_MAX_DAYS = 30;
 
 type SessionCardState =
@@ -193,6 +211,7 @@ function Review() {
   /** When true, the next subject-driven effect must not clear session (sidebar / session picker just set subject+date+slug). */
   const preserveSessionFromPickerRef = useRef(false);
   const skipSubjectScopeEffectRef = useRef(false);
+  const chatsBySubject = useRef<Record<string, SubjectChatCache>>(createChatsBySubject());
 
   const { data: profileFlags, isSuccess: profileFlagsReady } = useQuery({
     queryKey: ["profile-flags", user?.id],
@@ -236,22 +255,24 @@ function Review() {
     setChatRetrying(false);
   }, []);
 
-  /** Synchronous subject switch: clear session + UI so history never mixes across subjects. */
-  const switchSubject = useCallback(
-    (nextSubject: string) => {
-      if (onboardingIncomplete) return;
-      skipSubjectScopeEffectRef.current = true;
-      bumpSessionScope();
-      resetChatUiForScopeChange();
-      setActiveSessionSlug(null);
-      setSelectedDate(localYmd());
-      setSubject(nextSubject);
-      if (user?.id) {
-        void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
-      }
-    },
-    [bumpSessionScope, resetChatUiForScopeChange, onboardingIncomplete, user?.id, qc],
-  );
+  const clearCurrentSubjectChat = useCallback(() => {
+    if (onboardingIncomplete) return;
+    chatsBySubject.current[subject] = emptySubjectChatCache();
+    bumpSessionScope();
+    resetChatUiForScopeChange();
+    setActiveSessionSlug(null);
+    setSelectedDate(localYmd());
+    if (user?.id) {
+      void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
+    }
+  }, [
+    subject,
+    onboardingIncomplete,
+    bumpSessionScope,
+    resetChatUiForScopeChange,
+    user?.id,
+    qc,
+  ]);
 
   const loadSessionFromPicker = useCallback(
     (row: { subject: string; session_date: string; session_slug: string }) => {
@@ -509,27 +530,94 @@ function Review() {
       ? filterCoachMessagesForSession(messageRowsRaw, activeSessionSlug, chatSubject)
       : [];
 
+  const cachedSubjectChat = chatsBySubject.current[subject];
+  const hasCachedMessages =
+    cachedSubjectChat?.activeSessionSlug === activeSessionSlug &&
+    (cachedSubjectChat?.messages.length ?? 0) > 0;
+
   const showHistorySkeleton =
     !msgSkeletonDeadline &&
     !!activeSessionSlug &&
     (messagesPending || messagesFetching) &&
-    messageRows.length === 0;
+    messageRows.length === 0 &&
+    !hasCachedMessages;
 
-  const messages: SageChatMessage[] = useMemo(
-    () =>
-      messageRows
-        .filter((m): m is CoachMessageRow => typeof m.id === "string")
-        .map((m) => ({
-          id: m.id,
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-    [messageRows],
-  );
+  const messages: SageChatMessage[] = useMemo(() => {
+    const fromRows = messageRows
+      .filter((m): m is CoachMessageRow => typeof m.id === "string")
+      .map((m) => ({
+        id: m.id,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+    if (fromRows.length > 0) return fromRows;
+    const cached = chatsBySubject.current[subject];
+    if (cached?.activeSessionSlug === activeSessionSlug && cached.messages.length > 0) {
+      return cached.messages;
+    }
+    return fromRows;
+  }, [messageRows, subject, activeSessionSlug]);
 
   const userMessageCount = useMemo(
     () => messageRows.filter((m) => m.role === "user").length,
     [messageRows],
+  );
+
+  useEffect(() => {
+    if (onboardingIncomplete) return;
+    chatsBySubject.current[subject] = {
+      messages,
+      messageRows,
+      activeSessionSlug,
+      selectedDate,
+    };
+  }, [messages, messageRows, activeSessionSlug, selectedDate, subject, onboardingIncomplete]);
+
+  /** Save current subject chat, restore cached session/messages for the next subject. */
+  const switchSubject = useCallback(
+    (nextSubject: string) => {
+      if (onboardingIncomplete || nextSubject === subject) return;
+
+      chatsBySubject.current[subject] = {
+        messages,
+        messageRows,
+        activeSessionSlug,
+        selectedDate,
+      };
+
+      const cached = chatsBySubject.current[nextSubject] ?? emptySubjectChatCache();
+      let slug = cached.activeSessionSlug;
+      let date = cached.selectedDate;
+      if (!slug) {
+        const latest = sessionIndex.find((s) => s.subject === nextSubject);
+        if (latest) {
+          slug = latest.session_slug;
+          date = latest.session_date;
+        }
+      }
+
+      skipSubjectScopeEffectRef.current = true;
+      resetChatUiForScopeChange();
+      setSubject(nextSubject);
+      setSelectedDate(date);
+      setActiveSessionSlug(slug);
+
+      if (user?.id && slug && cached.messageRows.length > 0) {
+        qc.setQueryData(["review-messages", user.id, slug, nextSubject], cached.messageRows);
+      }
+    },
+    [
+      subject,
+      messages,
+      messageRows,
+      activeSessionSlug,
+      selectedDate,
+      sessionIndex,
+      resetChatUiForScopeChange,
+      onboardingIncomplete,
+      user?.id,
+      qc,
+    ],
   );
 
   const mobileSessionOptions = useMemo(() => {
@@ -683,6 +771,13 @@ function Review() {
         qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
       ]);
       window.dispatchEvent(new CustomEvent("sage-weak-archive-refresh"));
+
+      if (!wasGuidedFirst) {
+        chatsBySubject.current[summarySubject] = emptySubjectChatCache();
+        bumpSessionScope();
+        setActiveSessionSlug(null);
+        setSelectedDate(localYmd());
+      }
     } catch (e) {
       summaryDoneKeysRef.current.delete(key);
       setSessionCard(null);
@@ -1006,7 +1101,7 @@ function Review() {
       className="min-h-0 flex-1"
       showHistorySkeleton={showHistorySkeleton}
       streamingAssistantText={streamAssistantText}
-      composerHint={chatRetrying ? "重试中…" : isSending ? "Sage 正在输入…" : null}
+      composerHint={chatRetrying ? "重试中…" : null}
       betweenScrollAndInput={
         userMessageCount >= 3 ? (
           <Button

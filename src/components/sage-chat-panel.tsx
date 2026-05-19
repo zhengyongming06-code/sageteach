@@ -207,9 +207,6 @@ export function SageChatPanel({
     onSubmit();
   }, [draft, isSending, onDraftChange, onSubmit]);
 
-  const showTypingDots =
-    isSending && (streamingAssistantText == null || streamingAssistantText === "");
-
   const renderAssistantBubble = (content: string, streaming = false, key?: string) => (
     <div key={key} className="flex justify-start">
       {isMobile ? (
@@ -313,35 +310,8 @@ export function SageChatPanel({
             </div>
           );
         })}
-        {streamingAssistantText != null &&
-          renderAssistantBubble(streamingAssistantText, true, "__streaming__")}
-        {showTypingDots && (
-          <div className="flex justify-start">
-            {isMobile ? (
-              <div className="flex flex-col items-start gap-1">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
-                  Sage
-                </div>
-                <div className="rounded-[4px_16px_16px_16px] border border-border bg-white px-4 py-2.5 text-sm text-muted-foreground">
-                  <span className="inline-flex gap-1">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-border bg-background px-4 py-2.5 text-sm text-muted-foreground">
-                <span className="inline-flex gap-1">
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
-                </span>
-              </div>
-            )}
-          </div>
-        )}
+        {(streamingAssistantText != null || isSending) &&
+          renderAssistantBubble(streamingAssistantText ?? "", true, "__streaming__")}
       </div>
 
       <div className={cn("shrink-0", !isMobile && expand && "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm")}>
