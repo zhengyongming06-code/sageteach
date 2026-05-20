@@ -119,6 +119,33 @@ export type Database = {
         }
         Relationships: []
       }
+      diagnostic_results: {
+        Row: {
+          created_at: string
+          id: string
+          is_correct: boolean
+          knowledge_point: string
+          subject: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_correct: boolean
+          knowledge_point: string
+          subject: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_correct?: boolean
+          knowledge_point?: string
+          subject?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       daily_plans: {
         Row: {
           created_at: string
@@ -139,6 +166,36 @@ export type Database = {
           id?: string
           plan?: Json
           plan_date?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      knowledge_points: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          status: string
+          subject: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          status?: string
+          subject: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          status?: string
+          subject?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []

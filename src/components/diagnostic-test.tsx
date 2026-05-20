@@ -1,0 +1,371 @@
+import { useCallback, useState } from "react";
+import { Loader2, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { SUBJECTS, type Subject } from "@/lib/subjects";
+import { subjectBadgeClass } from "@/lib/subject-accent";
+import {
+  diagnosticQuestionCountForSubject,
+  getKnowledgePointsForDiagnosticCoverage,
+} from "@/lib/knowledge-points";
+import {
+  generateDiagnosticQuestionsForSubject,
+  isAnswerCorrect,
+  type DiagnosticQuestion,
+} from "@/lib/diagnostic-questions";
+import { saveDiagnosticResults, type DiagnosticAnswerRow } from "@/lib/diagnostic-db";
+import { diagnosticEligibilityQueryKey } from "@/lib/diagnostic-eligibility";
+import { knowledgePointsQueryKey } from "@/lib/knowledge-points-db";
+import { useQueryClient } from "@tanstack/react-query";
+
+type Phase = "pick-subject" | "generating" | "quiz" | "summary" | "saving";
+
+type AnswerRecord = {
+  knowledge_point: string;
+  is_correct: boolean;
+  selected: string;
+};
+
+export type DiagnosticTestProps = {
+  userId: string;
+  onClose?: () => void;
+  /** Called after results saved to Supabase */
+  onSaved?: () => void;
+};
+
+export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps) {
+  const qc = useQueryClient();
+  const [phase, setPhase] = useState<Phase>("pick-subject");
+  const [subject, setSubject] = useState<Subject | null>(null);
+  const [questions, setQuestions] = useState<DiagnosticQuestion[]>([]);
+  const [qIndex, setQIndex] = useState(0);
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [answers, setAnswers] = useState<AnswerRecord[]>([]);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
+  const [justSavedSubject, setJustSavedSubject] = useState<string | null>(null);
+
+  const resetToPickSubject = useCallback(() => {
+    setPhase("pick-subject");
+    setSubject(null);
+    setQuestions([]);
+    setQIndex(0);
+    setSelectedOption(null);
+    setShowFeedback(false);
+    setAnswers([]);
+    setGenProgress(null);
+  }, []);
+
+  const startGeneration = useCallback(async (sub: Subject) => {
+    setJustSavedSubject(null);
+    setSubject(sub);
+    setPhase("generating");
+    setGenError(null);
+    setQuestions([]);
+    setQIndex(0);
+    setSelectedOption(null);
+    setShowFeedback(false);
+    setAnswers([]);
+
+    const kps = getKnowledgePointsForDiagnosticCoverage(sub);
+    setGenProgress({ done: 0, total: kps.length });
+
+    try {
+      const qs = await generateDiagnosticQuestionsForSubject(sub, kps, {
+        onProgress: (done, total) => setGenProgress({ done, total }),
+      });
+      if (qs.length === 0) throw new Error("未生成题目");
+      setQuestions(qs);
+      setGenProgress(null);
+      setPhase("quiz");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "出题失败，请重试";
+      setGenError(msg);
+      setGenProgress(null);
+      setPhase("pick-subject");
+      toast.error(msg);
+    }
+  }, []);
+
+  const current = questions[qIndex];
+
+  const pickOption = (option: string) => {
+    if (!current || showFeedback) return;
+    setSelectedOption(option);
+    setShowFeedback(true);
+    const correct = isAnswerCorrect(option, current.answer);
+    setAnswers((prev) => [
+      ...prev,
+      {
+        knowledge_point: current.knowledge_point,
+        is_correct: correct,
+        selected: option,
+      },
+    ]);
+  };
+
+  const goNext = () => {
+    if (qIndex + 1 >= questions.length) {
+      setPhase("summary");
+      return;
+    }
+    setQIndex((i) => i + 1);
+    setSelectedOption(null);
+    setShowFeedback(false);
+  };
+
+  const weak = answers.filter((a) => !a.is_correct);
+  const strong = answers.filter((a) => a.is_correct);
+
+  const handleSave = async () => {
+    if (!subject || answers.length === 0) return;
+    setPhase("saving");
+    try {
+      const rows: DiagnosticAnswerRow[] = answers.map((a) => ({
+        knowledge_point: a.knowledge_point,
+        is_correct: a.is_correct,
+      }));
+      await saveDiagnosticResults(userId, subject, rows);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: diagnosticEligibilityQueryKey(userId) }),
+        qc.invalidateQueries({ queryKey: knowledgePointsQueryKey(userId) }),
+      ]);
+      toast.success("已保存到知识点档案");
+      onSaved?.();
+      setJustSavedSubject(subject);
+      resetToPickSubject();
+    } catch (e) {
+      console.error("[diagnostic] save failed", e);
+      toast.error(e instanceof Error ? e.message : "保存失败");
+      setPhase("summary");
+    }
+  };
+
+  if (phase === "pick-subject") {
+    return (
+      <div className="space-y-6">
+        <header className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">知识点诊断</h2>
+          <p className="text-sm text-muted-foreground">
+            选一个科目，Sage 会按该科全部知识点各出一道题（如数学 10 题），找出最需要补的部分。
+          </p>
+        </header>
+
+        {justSavedSubject ? (
+          <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
+            「{justSavedSubject}」已保存。可继续选择其他科目诊断，或点下方返回。
+          </p>
+        ) : null}
+
+        {genError ? (
+          <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {genError}
+          </p>
+        ) : null}
+
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-3">
+          {SUBJECTS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => void startGeneration(s)}
+              className={cn(
+                "rounded-xl border border-border bg-card px-3 py-3 text-sm font-medium transition",
+                "hover:border-primary/40 hover:bg-primary/5 active:scale-[0.98]",
+              )}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {onClose ? (
+          <Button type="button" variant="ghost" className="w-full" onClick={onClose}>
+            稍后再说
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (phase === "generating") {
+    return (
+      <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 py-12 text-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
+        <p className="text-sm font-medium text-foreground">Sage 正在出题…</p>
+        {subject ? (
+          <span className={subjectBadgeClass(subject)}>{subject}</span>
+        ) : null}
+        <p className="max-w-xs text-xs text-muted-foreground">
+          {genProgress
+            ? `正在生成 ${genProgress.done}/${genProgress.total} 题…`
+            : subject
+              ? `共 ${diagnosticQuestionCountForSubject(subject)} 个知识点，请稍候`
+              : "正在出题…"}
+        </p>
+      </div>
+    );
+  }
+
+  if (phase === "summary") {
+    return (
+      <div className="space-y-6">
+        <header className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">诊断结果</h2>
+          {subject ? (
+            <span className={cn(subjectBadgeClass(subject), "inline-block")}>{subject}</span>
+          ) : null}
+        </header>
+
+        <section className="space-y-2">
+          <h3 className="text-sm font-medium text-destructive">需要加强</h3>
+          {weak.length === 0 ? (
+            <p className="text-sm text-muted-foreground">本轮没有明显薄弱点，继续保持。</p>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {weak.map((a) => (
+                <li
+                  key={a.knowledge_point}
+                  className="flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden />
+                  {a.knowledge_point}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="space-y-2">
+          <h3 className="text-sm font-medium text-emerald-700 dark:text-emerald-400">掌握不错</h3>
+          {strong.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无答对的知识点记录。</p>
+          ) : (
+            <ul className="space-y-1.5 text-sm">
+              {strong.map((a) => (
+                <li
+                  key={a.knowledge_point}
+                  className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+                  {a.knowledge_point}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <Button type="button" className="w-full rounded-xl" onClick={() => void handleSave()}>
+          <Sparkles className="mr-2 h-4 w-4" />
+          保存到弱点档案
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full rounded-xl"
+          onClick={() => {
+            resetToPickSubject();
+            toast.message("未保存本轮结果，可换一科继续测");
+          }}
+        >
+          测其他科目（不保存本轮）
+        </Button>
+        {onClose ? (
+          <Button type="button" variant="outline" className="w-full rounded-xl" onClick={onClose}>
+            退出诊断
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (phase === "saving") {
+    return (
+      <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 py-12">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">正在保存…</p>
+      </div>
+    );
+  }
+
+  if (!current) {
+    return (
+      <div className="space-y-4 text-center">
+        <p className="text-sm text-muted-foreground">题目加载异常</p>
+        <Button type="button" variant="outline" onClick={() => setPhase("pick-subject")}>
+          重新选择科目
+        </Button>
+      </div>
+    );
+  }
+
+  const feedbackCorrect =
+    selectedOption != null && isAnswerCorrect(selectedOption, current.answer);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        {subject ? <span className={subjectBadgeClass(subject)}>{subject}</span> : <span />}
+        <span>
+          第 {qIndex + 1} / {questions.length} 题
+        </span>
+      </div>
+
+      <p className="text-xs font-medium text-primary">{current.knowledge_point}</p>
+      <p className="text-base font-medium leading-relaxed text-foreground">{current.question}</p>
+
+      <div className="grid gap-2">
+        {current.options.map((opt) => {
+          const letter = opt.trim().charAt(0).toUpperCase();
+          const isSelected = selectedOption === opt;
+          const isCorrectOpt = letter === current.answer.toUpperCase().charAt(0);
+          let variant = "border-border bg-card hover:border-primary/40 hover:bg-primary/5";
+          if (showFeedback && isSelected) {
+            variant = feedbackCorrect
+              ? "border-emerald-500/50 bg-emerald-500/10"
+              : "border-destructive/50 bg-destructive/10";
+          } else if (showFeedback && isCorrectOpt && !feedbackCorrect) {
+            variant = "border-emerald-500/40 bg-emerald-500/5";
+          }
+
+          return (
+            <button
+              key={opt}
+              type="button"
+              disabled={showFeedback}
+              onClick={() => pickOption(opt)}
+              className={cn(
+                "rounded-xl border px-4 py-3 text-left text-sm transition disabled:opacity-90",
+                variant,
+              )}
+            >
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+
+      {showFeedback ? (
+        <div
+          className={cn(
+            "rounded-xl border px-4 py-3 text-sm",
+            feedbackCorrect
+              ? "border-emerald-500/30 bg-emerald-500/5 text-foreground"
+              : "border-destructive/30 bg-destructive/5 text-foreground",
+          )}
+        >
+          <p className="font-medium">{feedbackCorrect ? "回答正确" : "回答错误"}</p>
+          <p className="mt-2 text-muted-foreground">{current.explanation}</p>
+        </div>
+      ) : null}
+
+      {showFeedback ? (
+        <Button type="button" className="w-full rounded-xl" onClick={goNext}>
+          {qIndex + 1 >= questions.length ? "查看结果" : "下一题"}
+        </Button>
+      ) : null}
+    </div>
+  );
+}

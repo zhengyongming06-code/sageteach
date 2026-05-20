@@ -3,7 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { Sparkles, Clock, Target } from "lucide-react";
+import {
+  diagnosticBannerDismissStorageKey,
+  diagnosticEligibilityQueryKey,
+  fetchDiagnosticBannerEligible,
+} from "@/lib/diagnostic-eligibility";
+import { Sparkles, Clock, Target, ChevronRight, X } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -151,6 +156,17 @@ function Today() {
   const skipBlurSave = useRef(false);
   const [archiveCelebrateId, setArchiveCelebrateId] = useState<string | null>(null);
   const celebrateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [diagnosticBannerDismissed, setDiagnosticBannerDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setDiagnosticBannerDismissed(false);
+      return;
+    }
+    setDiagnosticBannerDismissed(
+      sessionStorage.getItem(diagnosticBannerDismissStorageKey(user.id)) === "1",
+    );
+  }, [user?.id]);
 
   const { data: examRows = [] } = useQuery({
     queryKey: ["user-exams", user?.id],
@@ -235,6 +251,8 @@ function Today() {
       void qc.invalidateQueries({ queryKey: ["today-tasks", user.id] });
       void qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] });
       void qc.invalidateQueries({ queryKey: ["user-exams", user.id] });
+      void qc.invalidateQueries({ queryKey: diagnosticEligibilityQueryKey(user.id) });
+      void qc.invalidateQueries({ queryKey: ["knowledge-points", user.id] });
     };
     window.addEventListener("sage-weak-archive-refresh", onRefresh);
     return () => window.removeEventListener("sage-weak-archive-refresh", onRefresh);
@@ -320,6 +338,23 @@ function Today() {
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
+
+  const { data: diagnosticBannerEligible = false } = useQuery({
+    queryKey: diagnosticEligibilityQueryKey(user?.id ?? ""),
+    enabled: !!user?.id,
+    queryFn: () =>
+      raceQueryTimeout(TODAY_FETCH_MS, false, () => fetchDiagnosticBannerEligible(user!.id)),
+    staleTime: 60_000,
+  });
+
+  const showDiagnosticBanner =
+    !!user?.id && diagnosticBannerEligible && !diagnosticBannerDismissed;
+
+  const dismissDiagnosticBanner = useCallback(() => {
+    if (!user?.id) return;
+    sessionStorage.setItem(diagnosticBannerDismissStorageKey(user.id), "1");
+    setDiagnosticBannerDismissed(true);
+  }, [user?.id]);
 
   const hour = new Date().getHours();
   const greet =
@@ -527,6 +562,40 @@ function Today() {
         )}
       </section>
 
+      {showDiagnosticBanner ? (
+        <section
+          className="relative shrink-0 rounded-3xl border border-sky-200/80 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800/50 dark:bg-sky-950/30"
+          aria-label="知识点诊断"
+        >
+          <button
+            type="button"
+            onClick={dismissDiagnosticBanner}
+            className="absolute right-3 top-3 rounded-lg p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground"
+            aria-label="关闭提示"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <p className="pr-8 text-sm leading-relaxed text-sky-950 dark:text-sky-50">
+            做个知识点诊断，Sage 按全科考点帮你找出最需要补的部分
+            <ChevronRight className="ml-0.5 inline h-4 w-4 align-text-bottom" aria-hidden />
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button asChild className="rounded-xl" size="sm">
+              <Link to="/app/diagnostic">开始诊断</Link>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="rounded-xl text-muted-foreground"
+              onClick={dismissDiagnosticBanner}
+            >
+              稍后再说
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
       {pendingFollowUp ? (
         <section
           className="shrink-0 rounded-3xl border border-amber-200/70 bg-amber-50/90 p-4 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/30"
@@ -603,8 +672,20 @@ function Today() {
       </section>
 
       <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
-        <h2 className="text-sm font-semibold tracking-tight">我的卡点档案</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">按时间整理的复盘小结，勾选表示这个卡点已搞定。</p>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold tracking-tight">我的卡点档案</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              按时间整理的复盘小结，勾选表示这个卡点已搞定。
+            </p>
+          </div>
+          <Link
+            to="/app/diagnostic"
+            className="shrink-0 text-xs font-medium text-primary hover:underline"
+          >
+            知识点诊断 →
+          </Link>
+        </div>
 
         {archiveError ? (
           <p className="mt-4 text-sm text-destructive">卡点档案加载失败。</p>

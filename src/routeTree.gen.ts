@@ -19,6 +19,7 @@ import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authentic
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
 import { Route as AuthenticatedAppTodayRouteImport } from './routes/_authenticated/app.today'
 import { Route as AuthenticatedAppReviewRouteImport } from './routes/_authenticated/app.review'
+import { Route as AuthenticatedAppDiagnosticRouteImport } from './routes/_authenticated/app.diagnostic'
 import { Route as AuthenticatedAppCoachRouteImport } from './routes/_authenticated/app.coach'
 import { Route as AuthenticatedAppReviewArchiveRouteImport } from './routes/_authenticated/app.review.archive'
 
@@ -71,6 +72,12 @@ const AuthenticatedAppReviewRoute = AuthenticatedAppReviewRouteImport.update({
   path: '/review',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
+const AuthenticatedAppDiagnosticRoute =
+  AuthenticatedAppDiagnosticRouteImport.update({
+    id: '/diagnostic',
+    path: '/diagnostic',
+    getParentRoute: () => AuthenticatedAppRoute,
+  } as any)
 const AuthenticatedAppCoachRoute = AuthenticatedAppCoachRouteImport.update({
   id: '/coach',
   path: '/coach',
@@ -92,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/app/coach': typeof AuthenticatedAppCoachRoute
+  '/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
   '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
   '/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
@@ -105,6 +113,7 @@ export interface FileRoutesByTo {
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/app/coach': typeof AuthenticatedAppCoachRoute
+  '/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
   '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
   '/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
@@ -120,6 +129,7 @@ export interface FileRoutesById {
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/_authenticated/app/coach': typeof AuthenticatedAppCoachRoute
+  '/_authenticated/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
   '/_authenticated/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/_authenticated/app/today': typeof AuthenticatedAppTodayRoute
   '/_authenticated/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
@@ -135,6 +145,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/auth/update-password'
     | '/app/coach'
+    | '/app/diagnostic'
     | '/app/review'
     | '/app/today'
     | '/app/review/archive'
@@ -148,6 +159,7 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/auth/update-password'
     | '/app/coach'
+    | '/app/diagnostic'
     | '/app/review'
     | '/app/today'
     | '/app/review/archive'
@@ -162,6 +174,7 @@ export interface FileRouteTypes {
     | '/_authenticated/onboarding'
     | '/auth/update-password'
     | '/_authenticated/app/coach'
+    | '/_authenticated/app/diagnostic'
     | '/_authenticated/app/review'
     | '/_authenticated/app/today'
     | '/_authenticated/app/review/archive'
@@ -248,6 +261,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppReviewRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
+    '/_authenticated/app/diagnostic': {
+      id: '/_authenticated/app/diagnostic'
+      path: '/diagnostic'
+      fullPath: '/app/diagnostic'
+      preLoaderRoute: typeof AuthenticatedAppDiagnosticRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
     '/_authenticated/app/coach': {
       id: '/_authenticated/app/coach'
       path: '/coach'
@@ -281,12 +301,14 @@ const AuthenticatedAppReviewRouteWithChildren =
 
 interface AuthenticatedAppRouteChildren {
   AuthenticatedAppCoachRoute: typeof AuthenticatedAppCoachRoute
+  AuthenticatedAppDiagnosticRoute: typeof AuthenticatedAppDiagnosticRoute
   AuthenticatedAppReviewRoute: typeof AuthenticatedAppReviewRouteWithChildren
   AuthenticatedAppTodayRoute: typeof AuthenticatedAppTodayRoute
 }
 
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
   AuthenticatedAppCoachRoute: AuthenticatedAppCoachRoute,
+  AuthenticatedAppDiagnosticRoute: AuthenticatedAppDiagnosticRoute,
   AuthenticatedAppReviewRoute: AuthenticatedAppReviewRouteWithChildren,
   AuthenticatedAppTodayRoute: AuthenticatedAppTodayRoute,
 }

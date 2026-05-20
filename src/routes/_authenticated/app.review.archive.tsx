@@ -7,6 +7,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { subjectAccentCardClass, subjectBadgeClass } from "@/lib/subject-accent";
+import { KnowledgePointDiagnosisSection } from "@/components/knowledge-point-diagnosis-section";
+import { knowledgePointsQueryOptions } from "@/lib/knowledge-points-db";
 import {
   formatArchiveDateLabel,
   persistTaskCompletion,
@@ -29,6 +31,16 @@ function ReviewArchive() {
     isError,
   } = useQuery({
     ...weakArchiveQueryOptions(user!.id),
+    enabled: !!user?.id,
+    refetchOnMount: true,
+  });
+
+  const {
+    data: knowledgePoints = [],
+    isPending: kpPending,
+    isError: kpError,
+  } = useQuery({
+    ...knowledgePointsQueryOptions(user!.id),
     enabled: !!user?.id,
     refetchOnMount: true,
   });
@@ -68,12 +80,28 @@ function ReviewArchive() {
         返回复盘
       </Link>
 
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">弱点档案</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          按时间整理的复盘小结；勾选表示该条卡点已解决。
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">弱点档案</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            按时间整理的复盘小结；勾选表示该条卡点已解决。
+          </p>
+        </div>
+        <Link
+          to="/app/diagnostic"
+          className="shrink-0 rounded-xl border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10"
+        >
+          知识点诊断
+        </Link>
       </header>
+
+      {kpError ? (
+        <p className="text-sm text-destructive">知识点诊断加载失败。</p>
+      ) : kpPending ? (
+        <p className="text-sm text-muted-foreground">知识点诊断加载中…</p>
+      ) : (
+        <KnowledgePointDiagnosisSection rows={knowledgePoints} />
+      )}
 
       {showInitialLoading ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
