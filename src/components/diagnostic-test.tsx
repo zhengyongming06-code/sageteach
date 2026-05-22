@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { SUBJECTS, type Subject } from "@/lib/subjects";
@@ -25,11 +25,7 @@ import {
   fetchUserKnowledgePoints,
   knowledgePointsQueryKey,
 } from "@/lib/knowledge-points-db";
-import {
-  profileGradeQueryKey,
-  profileGradeQueryOptions,
-  updateProfileGrade,
-} from "@/lib/profile-grade";
+import { fetchProfileGrade } from "@/lib/profile-grade";
 
 /** UI labels shown in the difficulty picker (honest, non-exaggerated). */
 const DIAGNOSTIC_DIFFICULTY_UI: {
@@ -42,10 +38,9 @@ const DIAGNOSTIC_DIFFICULTY_UI: {
   { id: "hard", title: "较难", description: "综合题，多知识点结合" },
 ];
 
-const DIAGNOSTIC_GRADE_OPTIONS = ["高一", "高二", "高三"] as const;
+const DEFAULT_GRADE: UserGrade = "高三";
 
 type Phase =
-  | "pick-grade"
   | "pick-difficulty"
   | "pick-subject"
   | "generating"
@@ -78,7 +73,8 @@ function buildExcludeSet(
 
 export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   const qc = useQueryClient();
-  const { data: userGrade, isLoading: gradeLoading } = useQuery(profileGradeQueryOptions(userId));
+  const [userGrade, setUserGrade] = useState<UserGrade | null>(null);
+  const [gradeLoading, setGradeLoading] = useState(true);
 
   const [phase, setPhase] = useState<Phase>("pick-difficulty");
   const [difficulty, setDifficulty] = useState<DiagnosticDifficulty | null>(null);
@@ -92,17 +88,29 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   const [genError, setGenError] = useState<string | null>(null);
   const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
   const [justSavedSubject, setJustSavedSubject] = useState<string | null>(null);
-  const [savingGrade, setSavingGrade] = useState(false);
 
-  const effectivePhase = useMemo((): Phase => {
-    if (!gradeLoading && !userGrade && phase !== "pick-grade" && phase !== "saving") {
-      return "pick-grade";
-    }
-    return phase;
-  }, [gradeLoading, userGrade, phase]);
+  const grade = userGrade ?? DEFAULT_GRADE;
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fromProfile = await fetchProfileGrade(userId);
+        if (!cancelled) setUserGrade(fromProfile ?? DEFAULT_GRADE);
+      } catch (e) {
+        console.warn("[diagnostic] fetch profile grade failed", e);
+        if (!cancelled) setUserGrade(DEFAULT_GRADE);
+      } finally {
+        if (!cancelled) setGradeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const resetToPickSubject = useCallback(() => {
-    setPhase(userGrade ? "pick-subject" : "pick-grade");
+    setPhase("pick-subject");
     setSubject(null);
     setQuestions([]);
     setQIndex(0);
@@ -111,10 +119,10 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     setSessionAnswers([]);
     setDbTestedKps(new Set());
     setGenProgress(null);
-  }, [userGrade]);
+  }, []);
 
   const startRound = useCallback(
-    async (sub: Subject, grade: UserGrade) => {
+    async (sub: Subject, gradeForRound: UserGrade) => {
       setJustSavedSubject(null);
       setSubject(sub);
       setPhase("generating");
@@ -124,7 +132,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
       setSelectedOption(null);
       setShowFeedback(false);
 
-      const kpRows = await fetchUserKnowledgePoints(userId, grade);
+      const kpRows = await fetchUserKnowledgePoints(userId, gradeForRound);
       const dbTested = new Set(
         kpRows
           .filter((r) => r.subject === sub && r.status !== "未测试")
@@ -132,7 +140,12 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
       );
       setDbTestedKps(dbTested);
       const exclude = buildExcludeSet(sub, sessionAnswers, dbTested);
-      const kps = pickKnowledgePointsForDiagnosticRound(sub, grade, exclude, DIAGNOSTIC_QUESTION_COUNT);
+      const kps = pickKnowledgePointsForDiagnosticRound(
+        sub,
+        gradeForRound,
+        exclude,
+        DIAGNOSTIC_QUESTION_COUNT,
+      );
 
       if (kps.length === 0) {
         toast.message("该科目在当前年级下的知识点已全部测完");
@@ -162,29 +175,11 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     [difficulty, sessionAnswers, userId],
   );
 
-  const handlePickGrade = async (grade: (typeof DIAGNOSTIC_GRADE_OPTIONS)[number]) => {
-    setSavingGrade(true);
-    try {
-      await updateProfileGrade(userId, grade);
-      await qc.invalidateQueries({ queryKey: profileGradeQueryKey(userId) });
-      setPhase("pick-difficulty");
-      toast.success("年级已保存");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存年级失败");
-    } finally {
-      setSavingGrade(false);
-    }
-  };
-
   const startGeneration = useCallback(
     (sub: Subject) => {
-      if (!userGrade) {
-        setPhase("pick-grade");
-        return;
-      }
-      void startRound(sub, userGrade);
+      void startRound(sub, grade);
     },
-    [userGrade, startRound],
+    [grade, startRound],
   );
 
   const difficultyLabel =
@@ -218,7 +213,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   };
 
   const summaryStats = useMemo(() => {
-    if (!subject || !userGrade) {
+    if (!subject) {
       return {
         total: 0,
         testedCount: 0,
@@ -226,27 +221,27 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
         canContinue: false,
       };
     }
-    const total = getTotalKnowledgePointsForSubject(subject, userGrade);
+    const total = getTotalKnowledgePointsForSubject(subject, grade);
     const testedUnion = new Set(dbTestedKps);
     for (const a of sessionAnswers) testedUnion.add(a.knowledge_point);
     const testedCount = testedUnion.size;
     const remaining = Math.max(0, total - testedCount);
     const canContinue = remaining > 0;
     return { total, testedCount, remaining, canContinue };
-  }, [subject, userGrade, sessionAnswers, dbTestedKps]);
+  }, [subject, grade, sessionAnswers, dbTestedKps]);
 
   const weak = sessionAnswers.filter((a) => !a.is_correct);
   const strong = sessionAnswers.filter((a) => a.is_correct);
 
   const handleSave = async () => {
-    if (!subject || !userGrade || sessionAnswers.length === 0) return;
+    if (!subject || sessionAnswers.length === 0) return;
     setPhase("saving");
     try {
       const rows: DiagnosticAnswerRow[] = sessionAnswers.map((a) => ({
         knowledge_point: a.knowledge_point,
         is_correct: a.is_correct,
       }));
-      await saveDiagnosticResults(userId, subject, rows, userGrade);
+      await saveDiagnosticResults(userId, subject, rows, grade);
       await Promise.all([
         qc.invalidateQueries({ queryKey: diagnosticEligibilityQueryKey(userId) }),
         qc.invalidateQueries({ queryKey: knowledgePointsQueryKey(userId) }),
@@ -265,8 +260,8 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   };
 
   const handleContinue = () => {
-    if (!subject || !userGrade) return;
-    void startRound(subject, userGrade);
+    if (!subject) return;
+    void startRound(subject, grade);
   };
 
   if (gradeLoading) {
@@ -277,50 +272,15 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     );
   }
 
-  if (effectivePhase === "pick-grade") {
-    return (
-      <div className="space-y-6">
-        <header className="space-y-1">
-          <h2 className="text-xl font-semibold tracking-tight">先告诉我你的年级</h2>
-          <p className="text-sm text-muted-foreground">先告诉我你的年级，我来出对应的题。</p>
-        </header>
-        <div className="grid grid-cols-2 gap-2">
-          {DIAGNOSTIC_GRADE_OPTIONS.map((g) => (
-            <button
-              key={g}
-              type="button"
-              disabled={savingGrade}
-              onClick={() => void handlePickGrade(g)}
-              className={cn(
-                "rounded-2xl border border-border bg-card px-4 py-4 text-base font-medium transition",
-                "hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99]",
-              )}
-            >
-              {g}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (effectivePhase === "pick-difficulty") {
+  if (phase === "pick-difficulty") {
     return (
       <div className="space-y-6">
         <header className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight">选择诊断难度</h2>
           <p className="text-sm text-muted-foreground">
-            {userGrade ? `当前年级：${userGrade} · ` : ""}
-            先选难度，再选科目；每轮测 {DIAGNOSTIC_QUESTION_COUNT} 个知识点。
+            当前：{grade} · 每轮抽 {DIAGNOSTIC_QUESTION_COUNT} 个知识点 · 先选难度，再选科目
           </p>
         </header>
-        <button
-          type="button"
-          onClick={() => setPhase("pick-grade")}
-          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-        >
-          ← 更换年级
-        </button>
         <div className="space-y-3">
           {DIAGNOSTIC_DIFFICULTY_UI.map((opt) => (
             <button
@@ -344,15 +304,13 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     );
   }
 
-  if (effectivePhase === "pick-subject") {
+  if (phase === "pick-subject") {
     return (
       <div className="space-y-6">
         <header className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight">知识点诊断</h2>
           <p className="text-sm text-muted-foreground">
-            {difficultyLabel ? `当前：${difficultyLabel} · ` : ""}
-            {userGrade ? `${userGrade} · ` : ""}
-            每轮抽 {DIAGNOSTIC_QUESTION_COUNT} 个知识点，可分批测完。
+            当前：{difficultyLabel ?? "—"} · {grade} · 每轮抽 {DIAGNOSTIC_QUESTION_COUNT} 个知识点
           </p>
         </header>
 
@@ -395,7 +353,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     );
   }
 
-  if (effectivePhase === "generating") {
+  if (phase === "generating") {
     return (
       <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 py-12 text-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
@@ -417,7 +375,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     );
   }
 
-  if (effectivePhase === "summary") {
+  if (phase === "summary") {
     return (
       <div className="space-y-6">
         <header className="space-y-1">
@@ -499,7 +457,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     );
   }
 
-  if (effectivePhase === "saving") {
+  if (phase === "saving") {
     return (
       <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 py-12">
         <Loader2 className="h-7 w-7 animate-spin text-primary" />
