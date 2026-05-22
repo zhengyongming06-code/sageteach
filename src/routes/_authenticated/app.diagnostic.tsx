@@ -16,13 +16,13 @@ function DiagnosticPage() {
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-8">
       <Link
-        to="/app/today"
+        to="/app/review"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ChevronLeft className="h-4 w-4" />
-        返回 Today
+        返回 Review
       </Link>
-      <DiagnosticTest userId={user.id} onClose={() => window.history.back()} />
+      <DiagnosticTest userId={user.id} />
     </div>
   );
 }

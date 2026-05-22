@@ -10,8 +10,10 @@ import {
   getKnowledgePointsForDiagnosticCoverage,
 } from "@/lib/knowledge-points";
 import {
+  DIAGNOSTIC_DIFFICULTY_OPTIONS,
   generateDiagnosticQuestionsForSubject,
   isAnswerCorrect,
+  type DiagnosticDifficulty,
   type DiagnosticQuestion,
 } from "@/lib/diagnostic-questions";
 import { saveDiagnosticResults, type DiagnosticAnswerRow } from "@/lib/diagnostic-db";
@@ -19,7 +21,7 @@ import { diagnosticEligibilityQueryKey } from "@/lib/diagnostic-eligibility";
 import { knowledgePointsQueryKey } from "@/lib/knowledge-points-db";
 import { useQueryClient } from "@tanstack/react-query";
 
-type Phase = "pick-subject" | "generating" | "quiz" | "summary" | "saving";
+type Phase = "pick-difficulty" | "pick-subject" | "generating" | "quiz" | "summary" | "saving";
 
 type AnswerRecord = {
   knowledge_point: string;
@@ -29,14 +31,14 @@ type AnswerRecord = {
 
 export type DiagnosticTestProps = {
   userId: string;
-  onClose?: () => void;
   /** Called after results saved to Supabase */
   onSaved?: () => void;
 };
 
-export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps) {
+export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   const qc = useQueryClient();
-  const [phase, setPhase] = useState<Phase>("pick-subject");
+  const [phase, setPhase] = useState<Phase>("pick-difficulty");
+  const [difficulty, setDifficulty] = useState<DiagnosticDifficulty | null>(null);
   const [subject, setSubject] = useState<Subject | null>(null);
   const [questions, setQuestions] = useState<DiagnosticQuestion[]>([]);
   const [qIndex, setQIndex] = useState(0);
@@ -73,7 +75,8 @@ export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps
     setGenProgress({ done: 0, total: kps.length });
 
     try {
-      const qs = await generateDiagnosticQuestionsForSubject(sub, kps, {
+      if (!difficulty) throw new Error("请先选择难度");
+      const qs = await generateDiagnosticQuestionsForSubject(sub, kps, difficulty, {
         onProgress: (done, total) => setGenProgress({ done, total }),
       });
       if (qs.length === 0) throw new Error("未生成题目");
@@ -87,7 +90,10 @@ export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps
       setPhase("pick-subject");
       toast.error(msg);
     }
-  }, []);
+  }, [difficulty]);
+
+  const difficultyLabel =
+    DIAGNOSTIC_DIFFICULTY_OPTIONS.find((d) => d.id === difficulty)?.title ?? null;
 
   const current = questions[qIndex];
 
@@ -143,19 +149,58 @@ export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps
     }
   };
 
+  if (phase === "pick-difficulty") {
+    return (
+      <div className="space-y-6">
+        <header className="space-y-1">
+          <h2 className="text-xl font-semibold tracking-tight">选择诊断难度</h2>
+          <p className="text-sm text-muted-foreground">先选难度，再选科目开始诊断。</p>
+        </header>
+        <div className="space-y-3">
+          {DIAGNOSTIC_DIFFICULTY_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => {
+                setDifficulty(opt.id);
+                setPhase("pick-subject");
+              }}
+              className={cn(
+                "w-full rounded-2xl border border-border bg-card px-4 py-4 text-left transition",
+                "hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99]",
+              )}
+            >
+              <p className="text-base font-semibold text-foreground">{opt.title}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{opt.description}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (phase === "pick-subject") {
     return (
       <div className="space-y-6">
         <header className="space-y-1">
           <h2 className="text-xl font-semibold tracking-tight">知识点诊断</h2>
           <p className="text-sm text-muted-foreground">
-            选一个科目，Sage 会按该科全部知识点各出一道题（如数学 10 题），找出最需要补的部分。
+            {difficultyLabel ? `当前：${difficultyLabel} · ` : ""}
+            选一个科目，Sage 会按该科全部知识点各出一道题，找出最需要补的部分。
           </p>
         </header>
 
+        <button
+          type="button"
+          onClick={() => setPhase("pick-difficulty")}
+          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          ← 更换难度
+        </button>
+
         {justSavedSubject ? (
           <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-            「{justSavedSubject}」已保存。可继续选择其他科目诊断，或点下方返回。
+            「{justSavedSubject}」已保存。可继续选择其他科目诊断。
           </p>
         ) : null}
 
@@ -180,12 +225,6 @@ export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps
             </button>
           ))}
         </div>
-
-        {onClose ? (
-          <Button type="button" variant="ghost" className="w-full" onClick={onClose}>
-            稍后再说
-          </Button>
-        ) : null}
       </div>
     );
   }
@@ -195,9 +234,14 @@ export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps
       <div className="flex min-h-[240px] flex-col items-center justify-center gap-4 py-12 text-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden />
         <p className="text-sm font-medium text-foreground">Sage 正在出题…</p>
-        {subject ? (
-          <span className={subjectBadgeClass(subject)}>{subject}</span>
-        ) : null}
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {difficultyLabel ? (
+            <span className="rounded-lg border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
+              {difficultyLabel}
+            </span>
+          ) : null}
+          {subject ? <span className={subjectBadgeClass(subject)}>{subject}</span> : null}
+        </div>
         <p className="max-w-xs text-xs text-muted-foreground">
           {genProgress
             ? `正在生成 ${genProgress.done}/${genProgress.total} 题…`
@@ -272,11 +316,6 @@ export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps
         >
           测其他科目（不保存本轮）
         </Button>
-        {onClose ? (
-          <Button type="button" variant="outline" className="w-full rounded-xl" onClick={onClose}>
-            退出诊断
-          </Button>
-        ) : null}
       </div>
     );
   }
@@ -296,6 +335,9 @@ export function DiagnosticTest({ userId, onClose, onSaved }: DiagnosticTestProps
         <p className="text-sm text-muted-foreground">题目加载异常</p>
         <Button type="button" variant="outline" onClick={() => setPhase("pick-subject")}>
           重新选择科目
+        </Button>
+        <Button type="button" variant="ghost" onClick={() => setPhase("pick-difficulty")}>
+          重新选择难度
         </Button>
       </div>
     );

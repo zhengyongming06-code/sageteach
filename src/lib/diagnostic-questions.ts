@@ -1,6 +1,8 @@
 import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
 import type { Subject } from "@/lib/subjects";
 
+export type DiagnosticDifficulty = "easy" | "medium" | "hard";
+
 export type DiagnosticQuestion = {
   knowledge_point: string;
   question: string;
@@ -8,6 +10,22 @@ export type DiagnosticQuestion = {
   answer: string;
   explanation: string;
 };
+
+const DIFFICULTY_PROMPT: Record<DiagnosticDifficulty, string> = {
+  easy: "出基础题，难度为高考简单题",
+  medium: "出中等难度题，难度为高考中等题",
+  hard: "出压轴题，难度为高考最难的20%",
+};
+
+export const DIAGNOSTIC_DIFFICULTY_OPTIONS: {
+  id: DiagnosticDifficulty;
+  title: string;
+  description: string;
+}[] = [
+  { id: "easy", title: "摸底模式", description: "基础题为主，看看哪里有漏洞" },
+  { id: "medium", title: "冲刺模式", description: "中等难度，模拟真实考试水平" },
+  { id: "hard", title: "挑战模式", description: "压轴题难度，冲高分专用" },
+];
 
 const DIAGNOSTIC_QUESTION_SYSTEM = `你是高考出题专家。根据给定的知识点，出一道高考难度的单选题。
 只返回JSON，不要 markdown 代码块，不要其他说明文字。`;
@@ -82,6 +100,7 @@ export function parseDiagnosticQuestionsJson(
 export async function generateDiagnosticQuestions(
   subject: Subject,
   knowledgePoints: string[],
+  difficulty: DiagnosticDifficulty,
 ): Promise<DiagnosticQuestion[]> {
   const kpList = knowledgePoints
     .map((k, i) => `${i + 1}. ${k}`)
@@ -89,7 +108,8 @@ export async function generateDiagnosticQuestions(
 
   const userContent = `科目：${subject}
 
-请为以下 ${knowledgePoints.length} 个知识点各出一道高考难度单选题（每个知识点一题，共 ${knowledgePoints.length} 题）。
+请为以下 ${knowledgePoints.length} 个知识点各出一道单选题（每个知识点一题，共 ${knowledgePoints.length} 题）。
+难度要求：${DIFFICULTY_PROMPT[difficulty]}
 
 知识点列表：
 ${kpList}
@@ -142,6 +162,7 @@ ${kpList}
 export async function generateDiagnosticQuestionsForSubject(
   subject: Subject,
   knowledgePoints: string[],
+  difficulty: DiagnosticDifficulty,
   options?: {
     onProgress?: (completed: number, total: number) => void;
   },
@@ -154,7 +175,7 @@ export async function generateDiagnosticQuestionsForSubject(
 
   for (let offset = 0; offset < total; offset += batchSize) {
     const batch = knowledgePoints.slice(offset, offset + batchSize);
-    const qs = await generateDiagnosticQuestions(subject, batch);
+    const qs = await generateDiagnosticQuestions(subject, batch, difficulty);
     all.push(...qs);
     options?.onProgress?.(Math.min(offset + batch.length, total), total);
   }
