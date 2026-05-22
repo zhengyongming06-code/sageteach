@@ -136,7 +136,6 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
         const qs = await generateDiagnosticQuestionsForSubject(sub, kps, difficulty, {
           onProgress: (done, total) => setGenProgress({ done, total }),
         });
-        if (qs.length === 0) throw new Error("未生成题目");
         setQuestions(qs);
         setGenProgress(null);
         setPhase("quiz");
@@ -400,7 +399,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
         <p className="max-w-xs text-xs text-muted-foreground">
           {genProgress
             ? `正在出题 ${genProgress.done}/${genProgress.total}...`
-            : `正在出题 0/${DIAGNOSTIC_QUESTION_COUNT}...`}
+            : `正在出题…`}
         </p>
       </div>
     );
@@ -520,9 +519,6 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
         {subject ? <span className={subjectBadgeClass(subject)}>{subject}</span> : <span />}
         <span>
           第 {qIndex + 1} / {questions.length} 题
-          {userGrade && subject
-            ? ` · 本轮 ${sessionAnswers.length}/${DIAGNOSTIC_QUESTION_COUNT}`
-            : null}
         </span>
       </div>
 

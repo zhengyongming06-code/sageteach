@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { BlockMath, InlineMath } from "react-katex";
+import katex from "katex";
 import "katex/dist/katex.min.css";
 
 type Segment =
@@ -63,24 +63,45 @@ function splitInlineMath(text: string): Segment[] {
   return segments;
 }
 
+function renderKatexHtml(math: string, displayMode: boolean): string | null {
+  try {
+    const html = katex.renderToString(math, {
+      throwOnError: true,
+      displayMode,
+      strict: "ignore",
+    });
+    return html?.trim() ? html : null;
+  } catch {
+    return null;
+  }
+}
+
 function renderSegment(seg: Segment, key: string): ReactNode {
   if (seg.kind === "block") {
-    try {
+    const html = renderKatexHtml(seg.value, true);
+    if (html) {
       return (
-        <div key={key} className="my-2 overflow-x-auto">
-          <BlockMath math={seg.value} />
-        </div>
+        <div
+          key={key}
+          className="katex-block my-2 overflow-x-auto"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       );
-    } catch {
-      return <span key={key}>{seg.value}</span>;
     }
+    return <span key={key}>{seg.value}</span>;
   }
   if (seg.kind === "inline") {
-    try {
-      return <InlineMath key={key} math={seg.value} />;
-    } catch {
-      return <span key={key}>{seg.value}</span>;
+    const html = renderKatexHtml(seg.value, false);
+    if (html) {
+      return (
+        <span
+          key={key}
+          className="katex-inline inline-block align-middle"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      );
     }
+    return <span key={key}>{seg.value}</span>;
   }
   return <Fragment key={key}>{seg.value}</Fragment>;
 }

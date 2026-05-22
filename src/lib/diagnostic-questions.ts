@@ -12,9 +12,12 @@ export type DiagnosticQuestion = {
 };
 
 const DIFFICULTY_PROMPT: Record<DiagnosticDifficulty, string> = {
-  easy: "出基础题，难度为高考简单题",
-  medium: "出中等难度题，难度为高考中等题",
-  hard: "出压轴题，难度为高考最难的20%",
+  easy: `难度要求：高考基础题，送分题难度，直接代入公式可得答案，不需要复杂推导。
+出基础题，难度为高考简单题。`,
+  medium: `难度要求：高考中等题，需要2-3步推导，类似高考第10-14题难度。
+出中等难度题，难度为高考中等题。`,
+  hard: `难度要求：高考压轴题，必须是高考最后2-3道大题或选择题最后2题的难度，需要多步推导和综合知识点，绝对不能出基础送分题。
+出压轴题，难度为高考最难的20%。`,
 };
 
 export const DIAGNOSTIC_DIFFICULTY_OPTIONS: {
@@ -27,10 +30,19 @@ export const DIAGNOSTIC_DIFFICULTY_OPTIONS: {
   { id: "hard", title: "挑战模式", description: "压轴题难度，冲高分专用" },
 ];
 
-const DIAGNOSTIC_QUESTION_SYSTEM = `你是严谨的高考出题专家。出一道高考单选题。
+/** Minimum successfully generated questions before starting a quiz round. */
+export const MIN_DIAGNOSTIC_QUESTIONS = 4;
+
+function diagnosticSystemPrompt(difficulty: DiagnosticDifficulty): string {
+  const complexityRule =
+    difficulty === "hard"
+      ? "2. 题目必须达到压轴难度，需要多步综合推理，禁止出送分基础题"
+      : "2. 题目难度必须严格符合用户指定的难度要求";
+
+  return `你是严谨的高考出题专家。出一道高考单选题。
 要求：
 1. 答案必须唯一且正确，出题前在脑中验算
-2. 题目不要太复杂，确保能出正确答案
+${complexityRule}
 3. 只返回JSON，不含任何其他文字
 4. JSON格式严格如下，不要有换行符在字符串内：
 {
@@ -41,11 +53,15 @@ const DIAGNOSTIC_QUESTION_SYSTEM = `你是严谨的高考出题专家。出一�
   "explanation": "解析"
 }
 5. 字符串内不要有未转义的引号或换行`;
+}
 
 const LATEX_FORMAT_HINT =
   "数学公式请用LaTeX格式，行内公式用$...$包裹，例如：$y^2=2px$，$\\pm\\sqrt{2}$，$\\frac{1}{4}$。";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+
+const SIMPLER_RETRY_HINT =
+  "请出一道更简单的单选题，一两步可得答案，确保能输出合法 JSON。";
 
 /** Strip think blocks / fences / control chars, then isolate the JSON object. */
 function cleanJson(raw: string): string {
@@ -117,15 +133,16 @@ export function parseDiagnosticQuestionsJson(
   return null;
 }
 
-/** Generate one question for a single knowledge point (skipped on timeout/parse failure). */
-export async function generateDiagnosticQuestionForKnowledgePoint(
+async function requestQuestionForKnowledgePoint(
   subject: Subject,
   knowledgePoint: string,
   difficulty: DiagnosticDifficulty,
+  simpler: boolean,
 ): Promise<DiagnosticQuestion | null> {
   const userContent = `科目：${subject}
 知识点：${knowledgePoint}
-难度要求：${DIFFICULTY_PROMPT[difficulty]}
+${DIFFICULTY_PROMPT[difficulty]}
+${simpler ? SIMPLER_RETRY_HINT : ""}
 ${LATEX_FORMAT_HINT}
 knowledge_point 必须与「${knowledgePoint}」完全一致。`;
 
@@ -133,7 +150,7 @@ knowledge_point 必须与「${knowledgePoint}」完全一致。`;
   try {
     text = await invokeDeepSeekChat(
       [
-        { role: "system", content: DIAGNOSTIC_QUESTION_SYSTEM },
+        { role: "system", content: diagnosticSystemPrompt(difficulty) },
         { role: "user", content: userContent },
       ],
       {
@@ -143,7 +160,7 @@ knowledge_point 必须与「${knowledgePoint}」完全一致。`;
       },
     );
   } catch (e) {
-    console.warn("[diagnostic] request failed, skipping", knowledgePoint, e);
+    console.warn("[diagnostic] request failed", knowledgePoint, simpler ? "(retry)" : "", e);
     return null;
   }
 
@@ -158,14 +175,30 @@ knowledge_point 必须与「${knowledgePoint}」完全一致。`;
     );
 
   if (!q) {
-    console.warn("[diagnostic] parse failed for", knowledgePoint, text.slice(0, 600));
+    console.warn(
+      "[diagnostic] parse failed for",
+      knowledgePoint,
+      simpler ? "(retry)" : "",
+      text.slice(0, 600),
+    );
     return null;
   }
 
   return { ...q, knowledge_point: knowledgePoint };
 }
 
-/** Generate diagnostic questions in parallel; failed items are skipped. */
+/** Generate one question; retries once with a simpler prompt before giving up. */
+export async function generateDiagnosticQuestionForKnowledgePoint(
+  subject: Subject,
+  knowledgePoint: string,
+  difficulty: DiagnosticDifficulty,
+): Promise<DiagnosticQuestion | null> {
+  const first = await requestQuestionForKnowledgePoint(subject, knowledgePoint, difficulty, false);
+  if (first) return first;
+  return requestQuestionForKnowledgePoint(subject, knowledgePoint, difficulty, true);
+}
+
+/** Generate diagnostic questions in parallel; throws if too few succeed. */
 export async function generateDiagnosticQuestionsForSubject(
   subject: Subject,
   knowledgePoints: string[],
@@ -191,7 +224,13 @@ export async function generateDiagnosticQuestionsForSubject(
     }),
   );
 
-  return settled.filter((q): q is DiagnosticQuestion => q != null);
+  const results = settled.filter((q): q is DiagnosticQuestion => q != null);
+  if (results.length < MIN_DIAGNOSTIC_QUESTIONS) {
+    throw new Error(
+      `本轮仅生成 ${results.length} 道题，至少需要 ${MIN_DIAGNOSTIC_QUESTIONS} 道，请重试`,
+    );
+  }
+  return results;
 }
 
 export function letterFromOptionLabel(option: string): string {

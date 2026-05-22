@@ -115,7 +115,7 @@ export function getKnowledgePointsForSubject(
 }
 
 /** Questions per diagnostic round. */
-export const DIAGNOSTIC_QUESTION_COUNT = 5;
+export const DIAGNOSTIC_QUESTION_COUNT = 6;
 
 export function getTotalKnowledgePointsForSubject(subject: Subject, grade: UserGrade): number {
   return getKnowledgePointsForSubjectAndGrade(subject, grade).length;
