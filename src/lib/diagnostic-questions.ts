@@ -46,22 +46,16 @@ function resolveDiagnosticModel(subject: Subject): DeepSeekModel {
   return subject === "数学" || subject === "物理" ? "deepseek-reasoner" : "deepseek-chat";
 }
 
-function stripReasoningArtifacts(raw: string): string {
-  let s = raw.trim();
-  s = s.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  return s;
-}
-
-function extractJsonPayload(raw: string): string {
-  let s = stripReasoningArtifacts(raw);
-  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-  const arrStart = s.indexOf("[");
-  const arrEnd = s.lastIndexOf("]");
-  if (arrStart !== -1 && arrEnd > arrStart) return s.slice(arrStart, arrEnd + 1);
-  const objStart = s.indexOf("{");
-  const objEnd = s.lastIndexOf("}");
-  if (objStart !== -1 && objEnd > objStart) return s.slice(objStart, objEnd + 1);
-  return s;
+/** Strip R1 think blocks / markdown fences, then isolate the JSON object. */
+function cleanJson(raw: string): string {
+  let text = raw;
+  text = text.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, "");
+  text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  text = text.replace(/```json\n?/gi, "").replace(/```\n?/g, "");
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("No JSON found");
+  return text.slice(start, end + 1);
 }
 
 function normalizeAnswerLetter(raw: unknown): string | null {
@@ -93,7 +87,13 @@ export function parseDiagnosticQuestionsJson(
   raw: string,
   expectedKnowledgePoints: string[],
 ): DiagnosticQuestion[] | null {
-  const payload = extractJsonPayload(raw);
+  let payload: string;
+  try {
+    payload = cleanJson(raw);
+  } catch (e) {
+    console.warn("[diagnostic] cleanJson failed", e, raw.slice(0, 400));
+    return null;
+  }
   try {
     const parsed = JSON.parse(payload) as unknown;
     if (Array.isArray(parsed)) {
