@@ -1,6 +1,11 @@
 import { queryOptions } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { allCatalogKnowledgePointRows, type KnowledgePointStatus } from "@/lib/knowledge-points";
+import {
+  allCatalogKnowledgePointRows,
+  type KnowledgePointStatus,
+  type UserGrade,
+} from "@/lib/knowledge-points";
+import { fetchProfileGrade } from "@/lib/profile-grade";
 import { SUBJECTS, type Subject } from "@/lib/subjects";
 
 export type UserKnowledgePointRow = {
@@ -20,7 +25,11 @@ export function knowledgePointsQueryOptions(userId: string) {
   });
 }
 
-export async function fetchUserKnowledgePoints(userId: string): Promise<UserKnowledgePointRow[]> {
+export async function fetchUserKnowledgePoints(
+  userId: string,
+  grade?: UserGrade | null,
+): Promise<UserKnowledgePointRow[]> {
+  const profileGrade = grade ?? (await fetchProfileGrade(userId));
   const { data, error } = await supabase
     .from("knowledge_points")
     .select("id,subject,name,status")
@@ -41,7 +50,7 @@ export async function fetchUserKnowledgePoints(userId: string): Promise<UserKnow
       }));
   }
 
-  return allCatalogKnowledgePointRows().map(({ subject, name }) => ({
+  return allCatalogKnowledgePointRows(profileGrade).map(({ subject, name }) => ({
     id: null,
     subject,
     name,

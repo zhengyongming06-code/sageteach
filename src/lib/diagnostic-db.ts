@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { allCatalogKnowledgePointRows } from "@/lib/knowledge-points";
+import { allCatalogKnowledgePointRows, type UserGrade } from "@/lib/knowledge-points";
 import type { Subject } from "@/lib/subjects";
 
 export type DiagnosticAnswerRow = {
@@ -7,8 +7,11 @@ export type DiagnosticAnswerRow = {
   is_correct: boolean;
 };
 
-/** Seed full catalog with 未测试 when user has no rows yet. */
-export async function seedKnowledgePointsCatalogIfEmpty(userId: string): Promise<void> {
+/** Seed grade-appropriate catalog with 未测试 when user has no rows yet. */
+export async function seedKnowledgePointsCatalogIfEmpty(
+  userId: string,
+  grade?: UserGrade | null,
+): Promise<void> {
   const { count, error: countErr } = await supabase
     .from("knowledge_points")
     .select("id", { count: "exact", head: true })
@@ -16,7 +19,7 @@ export async function seedKnowledgePointsCatalogIfEmpty(userId: string): Promise
   if (countErr) throw countErr;
   if ((count ?? 0) > 0) return;
 
-  const rows = allCatalogKnowledgePointRows().map(({ subject, name }) => ({
+  const rows = allCatalogKnowledgePointRows(grade).map(({ subject, name }) => ({
     user_id: userId,
     subject,
     name,
@@ -31,8 +34,9 @@ export async function saveDiagnosticResults(
   userId: string,
   subject: Subject,
   answers: DiagnosticAnswerRow[],
+  grade?: UserGrade | null,
 ): Promise<void> {
-  await seedKnowledgePointsCatalogIfEmpty(userId);
+  await seedKnowledgePointsCatalogIfEmpty(userId, grade);
 
   const resultRows = answers.map((a) => ({
     user_id: userId,
