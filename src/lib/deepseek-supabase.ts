@@ -103,10 +103,13 @@ async function readDeepSeekSseStream(
   return text;
 }
 
+export type DeepSeekModel = "deepseek-chat" | "deepseek-reasoner";
+
 /** Direct DeepSeek API (non-streaming) — summaries / daily questions. */
 async function invokeDeepSeekDirect(
   messages: DeepSeekMessage[],
   max_tokens: number,
+  model: DeepSeekModel,
   signal?: AbortSignal,
 ): Promise<string> {
   const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY?.trim();
@@ -127,7 +130,7 @@ async function invokeDeepSeekDirect(
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model,
       messages: safeMessages,
       max_tokens: safeMax,
       stream: false,
@@ -160,6 +163,7 @@ async function invokeDeepSeekDirect(
 async function invokeDeepSeekDirectStream(
   messages: DeepSeekMessage[],
   max_tokens: number,
+  model: DeepSeekModel,
   onDelta: (textSoFar: string, delta: string) => void,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -182,7 +186,7 @@ async function invokeDeepSeekDirectStream(
       Accept: "text/event-stream",
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model,
       messages: safeMessages,
       max_tokens: safeMax,
       stream: true,
@@ -205,13 +209,14 @@ async function invokeDeepSeekDirectStream(
 async function invokeOnce(
   messages: DeepSeekMessage[],
   max_tokens: number,
+  model: DeepSeekModel,
   signal: AbortSignal | undefined,
   onDelta: ((textSoFar: string, delta: string) => void) | undefined,
 ): Promise<string> {
   if (onDelta) {
-    return invokeDeepSeekDirectStream(messages, max_tokens, onDelta, signal);
+    return invokeDeepSeekDirectStream(messages, max_tokens, model, onDelta, signal);
   }
-  return invokeDeepSeekDirect(messages, max_tokens, signal);
+  return invokeDeepSeekDirect(messages, max_tokens, model, signal);
 }
 
 function mergeAbortSignals(
@@ -248,6 +253,7 @@ export type InvokeDeepSeekChatOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   onRetrying?: () => void;
+  model?: DeepSeekModel;
   /** Enables `stream: true` and incremental UI updates. */
   onDelta?: (textSoFar: string, delta: string) => void;
 };
@@ -262,6 +268,7 @@ export async function invokeDeepSeekChat(
 ): Promise<string> {
   const max_tokens = options?.max_tokens ?? 1000;
   const timeoutMs = options?.timeoutMs;
+  const model = options?.model ?? "deepseek-chat";
   const maxAttempts = 3;
   const onDelta = options?.onDelta;
 
@@ -292,7 +299,7 @@ export async function invokeDeepSeekChat(
           }
         : undefined;
 
-      const text = await invokeOnce(messages, max_tokens, signal, deltaCb);
+      const text = await invokeOnce(messages, max_tokens, model, signal, deltaCb);
       return text;
     } catch (e) {
       if (timedOut()) {

@@ -5,10 +5,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { SUBJECTS, type Subject } from "@/lib/subjects";
 import { subjectBadgeClass } from "@/lib/subject-accent";
-import {
-  diagnosticQuestionCountForSubject,
-  getKnowledgePointsForDiagnosticCoverage,
-} from "@/lib/knowledge-points";
+import { getKnowledgePointsForDiagnosticCoverage } from "@/lib/knowledge-points";
+import { DiagnosticMathText } from "@/components/diagnostic-math-text";
 import {
   DIAGNOSTIC_DIFFICULTY_OPTIONS,
   generateDiagnosticQuestionsForSubject,
@@ -46,7 +44,6 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   const [showFeedback, setShowFeedback] = useState(false);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [genError, setGenError] = useState<string | null>(null);
-  const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
   const [justSavedSubject, setJustSavedSubject] = useState<string | null>(null);
 
   const resetToPickSubject = useCallback(() => {
@@ -57,7 +54,6 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     setSelectedOption(null);
     setShowFeedback(false);
     setAnswers([]);
-    setGenProgress(null);
   }, []);
 
   const startGeneration = useCallback(async (sub: Subject) => {
@@ -72,21 +68,16 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     setAnswers([]);
 
     const kps = getKnowledgePointsForDiagnosticCoverage(sub);
-    setGenProgress({ done: 0, total: kps.length });
 
     try {
       if (!difficulty) throw new Error("请先选择难度");
-      const qs = await generateDiagnosticQuestionsForSubject(sub, kps, difficulty, {
-        onProgress: (done, total) => setGenProgress({ done, total }),
-      });
+      const qs = await generateDiagnosticQuestionsForSubject(sub, kps, difficulty);
       if (qs.length === 0) throw new Error("未生成题目");
       setQuestions(qs);
-      setGenProgress(null);
       setPhase("quiz");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "出题失败，请重试";
       setGenError(msg);
-      setGenProgress(null);
       setPhase("pick-subject");
       toast.error(msg);
     }
@@ -242,13 +233,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
           ) : null}
           {subject ? <span className={subjectBadgeClass(subject)}>{subject}</span> : null}
         </div>
-        <p className="max-w-xs text-xs text-muted-foreground">
-          {genProgress
-            ? `正在生成 ${genProgress.done}/${genProgress.total} 题…`
-            : subject
-              ? `共 ${diagnosticQuestionCountForSubject(subject)} 个知识点，请稍候`
-              : "正在出题…"}
-        </p>
+        <p className="max-w-xs text-xs text-muted-foreground">Sage 正在出题，约需10秒...</p>
       </div>
     );
   }
@@ -356,7 +341,9 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
       </div>
 
       <p className="text-xs font-medium text-primary">{current.knowledge_point}</p>
-      <p className="text-base font-medium leading-relaxed text-foreground">{current.question}</p>
+      <p className="text-base font-medium leading-relaxed text-foreground">
+        <DiagnosticMathText>{current.question}</DiagnosticMathText>
+      </p>
 
       <div className="grid gap-2">
         {current.options.map((opt) => {
@@ -383,7 +370,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
                 variant,
               )}
             >
-              {opt}
+              <DiagnosticMathText>{opt}</DiagnosticMathText>
             </button>
           );
         })}
@@ -399,7 +386,9 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
           )}
         >
           <p className="font-medium">{feedbackCorrect ? "回答正确" : "回答错误"}</p>
-          <p className="mt-2 text-muted-foreground">{current.explanation}</p>
+          <p className="mt-2 text-muted-foreground">
+            <DiagnosticMathText>{current.explanation}</DiagnosticMathText>
+          </p>
         </div>
       ) : null}
 
