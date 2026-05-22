@@ -44,6 +44,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   const [showFeedback, setShowFeedback] = useState(false);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [genError, setGenError] = useState<string | null>(null);
+  const [genProgress, setGenProgress] = useState<{ done: number; total: number } | null>(null);
   const [justSavedSubject, setJustSavedSubject] = useState<string | null>(null);
 
   const resetToPickSubject = useCallback(() => {
@@ -54,6 +55,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     setSelectedOption(null);
     setShowFeedback(false);
     setAnswers([]);
+    setGenProgress(null);
   }, []);
 
   const startGeneration = useCallback(async (sub: Subject) => {
@@ -68,16 +70,21 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     setAnswers([]);
 
     const kps = getKnowledgePointsForDiagnosticCoverage(sub);
+    setGenProgress({ done: 0, total: kps.length });
 
     try {
       if (!difficulty) throw new Error("请先选择难度");
-      const qs = await generateDiagnosticQuestionsForSubject(sub, kps, difficulty);
+      const qs = await generateDiagnosticQuestionsForSubject(sub, kps, difficulty, {
+        onProgress: (done, total) => setGenProgress({ done, total }),
+      });
       if (qs.length === 0) throw new Error("未生成题目");
       setQuestions(qs);
+      setGenProgress(null);
       setPhase("quiz");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "出题失败，请重试";
       setGenError(msg);
+      setGenProgress(null);
       setPhase("pick-subject");
       toast.error(msg);
     }
@@ -233,7 +240,11 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
           ) : null}
           {subject ? <span className={subjectBadgeClass(subject)}>{subject}</span> : null}
         </div>
-        <p className="max-w-xs text-xs text-muted-foreground">Sage 正在出题，约需10秒...</p>
+        <p className="max-w-xs text-xs text-muted-foreground">
+          {genProgress
+            ? `正在出题 ${genProgress.done}/${genProgress.total}...`
+            : "Sage 正在出题，约需10秒..."}
+        </p>
       </div>
     );
   }

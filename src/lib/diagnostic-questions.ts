@@ -41,6 +41,12 @@ const LATEX_FORMAT_HINT =
   "数学公式请用LaTeX格式，行内公式用$...$包裹，例如：$y^2=2px$，$\\pm\\sqrt{2}$，$\\frac{1}{4}$。";
 
 const GENERATION_TIMEOUT_MS = 120_000;
+const GENERATION_BATCH_SIZE = 2;
+const GENERATION_BATCH_DELAY_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function resolveDiagnosticModel(subject: Subject): DeepSeekModel {
   return subject === "数学" || subject === "物理" ? "deepseek-reasoner" : "deepseek-chat";
@@ -116,7 +122,7 @@ export function parseDiagnosticQuestionsJson(
   return null;
 }
 
-/** Generate one question for a single knowledge point (used in parallel). */
+/** Generate one question for a single knowledge point. */
 export async function generateDiagnosticQuestionForKnowledgePoint(
   subject: Subject,
   knowledgePoint: string,
@@ -170,21 +176,37 @@ ${LATEX_FORMAT_HINT}
   return { ...q, knowledge_point: knowledgePoint };
 }
 
-/** Generate all subject questions in parallel (one API call per knowledge point). */
+/** Generate questions in small batches to avoid R1 rate limits. */
 export async function generateDiagnosticQuestionsForSubject(
   subject: Subject,
   knowledgePoints: string[],
   difficulty: DiagnosticDifficulty,
+  options?: {
+    onProgress?: (completed: number, total: number) => void;
+  },
 ): Promise<DiagnosticQuestion[]> {
-  if (knowledgePoints.length === 0) return [];
+  const total = knowledgePoints.length;
+  if (total === 0) return [];
 
-  const questions = await Promise.all(
-    knowledgePoints.map((kp) =>
-      generateDiagnosticQuestionForKnowledgePoint(subject, kp, difficulty),
-    ),
-  );
+  const results: DiagnosticQuestion[] = [];
+  options?.onProgress?.(0, total);
 
-  return questions;
+  for (let i = 0; i < total; i += GENERATION_BATCH_SIZE) {
+    const batch = knowledgePoints.slice(i, i + GENERATION_BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map((kp) =>
+        generateDiagnosticQuestionForKnowledgePoint(subject, kp, difficulty),
+      ),
+    );
+    results.push(...batchResults);
+    options?.onProgress?.(results.length, total);
+
+    if (i + GENERATION_BATCH_SIZE < total) {
+      await sleep(GENERATION_BATCH_DELAY_MS);
+    }
+  }
+
+  return results;
 }
 
 export function letterFromOptionLabel(option: string): string {

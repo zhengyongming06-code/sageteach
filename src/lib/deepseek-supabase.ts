@@ -155,7 +155,17 @@ async function invokeDeepSeekDirect(
   const text = choices?.[0]?.message?.content?.trim();
   if (text) return text;
 
-  console.error("[deepseek-direct] empty choices", { status: res.status });
+  if (!choices || choices.length === 0) {
+    if (model === "deepseek-reasoner") {
+      console.log("[deepseek-direct] R1 empty, falling back to deepseek-chat");
+      return invokeDeepSeekDirect(messages, max_tokens, "deepseek-chat", signal);
+    }
+  } else if (model === "deepseek-reasoner") {
+    console.log("[deepseek-direct] R1 empty content, falling back to deepseek-chat");
+    return invokeDeepSeekDirect(messages, max_tokens, "deepseek-chat", signal);
+  }
+
+  console.error("[deepseek-direct] empty choices", { status: res.status, model });
   throw new Error("AI 没有返回内容，再试一次。");
 }
 
