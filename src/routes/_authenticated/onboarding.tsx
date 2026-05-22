@@ -12,7 +12,7 @@ export const Route = createFileRoute("/_authenticated/onboarding")({
   component: Onboarding,
 });
 
-const STEP1_GRADES = ["高一", "高二", "高三", "已毕业"] as const;
+const STEP1_GRADES = ["高一", "高二", "高三"] as const;
 
 function Onboarding() {
   const { user } = useAuth();

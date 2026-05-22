@@ -5,7 +5,7 @@ export const KNOWLEDGE_POINT_STATUSES = ["未测试", "薄弱", "掌握中", "�
 
 export type KnowledgePointStatus = (typeof KNOWLEDGE_POINT_STATUSES)[number];
 
-export const GRADE_OPTIONS = ["高一", "高二", "高三", "已毕业"] as const;
+export const GRADE_OPTIONS = ["高一", "高二", "高三"] as const;
 
 export type UserGrade = (typeof GRADE_OPTIONS)[number];
 
@@ -71,7 +71,7 @@ export function isSubject(subject: string): subject is Subject {
 
 export function normalizeUserGrade(raw: string | null | undefined): UserGrade | null {
   if (!raw) return null;
-  if (raw === "其他") return "已毕业";
+  if (raw === "其他" || raw === "已毕业") return "高三";
   if ((GRADE_OPTIONS as readonly string[]).includes(raw)) return raw as UserGrade;
   return null;
 }
@@ -84,7 +84,6 @@ export function gradeBandsForUser(grade: UserGrade): GradeBand[] {
     case "高二":
       return ["高一", "高二"];
     case "高三":
-    case "已毕业":
       return ["高一", "高二", "高三"];
     default:
       return ["高三"];

@@ -13,12 +13,23 @@ import {
   type UserGrade,
 } from "@/lib/knowledge-points";
 import { DiagnosticMathText } from "@/components/diagnostic-math-text";
+import { saveDiagnosticResults, type DiagnosticAnswerRow } from "@/lib/diagnostic-db";
+import { diagnosticEligibilityQueryKey } from "@/lib/diagnostic-eligibility";
 import {
   generateDiagnosticQuestionsForSubject,
   isAnswerCorrect,
   type DiagnosticDifficulty,
   type DiagnosticQuestion,
 } from "@/lib/diagnostic-questions";
+import {
+  fetchUserKnowledgePoints,
+  knowledgePointsQueryKey,
+} from "@/lib/knowledge-points-db";
+import {
+  profileGradeQueryKey,
+  profileGradeQueryOptions,
+  updateProfileGrade,
+} from "@/lib/profile-grade";
 
 /** UI labels shown in the difficulty picker (honest, non-exaggerated). */
 const DIAGNOSTIC_DIFFICULTY_UI: {
@@ -30,18 +41,8 @@ const DIAGNOSTIC_DIFFICULTY_UI: {
   { id: "medium", title: "中等", description: "中等难度，模拟日常练习水平" },
   { id: "hard", title: "较难", description: "综合题，多知识点结合" },
 ];
-import { saveDiagnosticResults, type DiagnosticAnswerRow } from "@/lib/diagnostic-db";
-import { diagnosticEligibilityQueryKey } from "@/lib/diagnostic-eligibility";
-import {
-  fetchUserKnowledgePoints,
-  knowledgePointsQueryKey,
-} from "@/lib/knowledge-points-db";
-import {
-  GRADE_OPTIONS,
-  profileGradeQueryKey,
-  profileGradeQueryOptions,
-  updateProfileGrade,
-} from "@/lib/profile-grade";
+
+const DIAGNOSTIC_GRADE_OPTIONS = ["高一", "高二", "高三"] as const;
 
 type Phase =
   | "pick-grade"
@@ -148,6 +149,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
         });
         setQuestions(qs);
         setGenProgress(null);
+        toast.success(`本轮生成了${qs.length}道题，点击开始作答`);
         setPhase("quiz");
       } catch (e) {
         const msg = e instanceof Error ? e.message : "出题失败，请重试";
@@ -160,7 +162,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     [difficulty, sessionAnswers, userId],
   );
 
-  const handlePickGrade = async (grade: UserGrade) => {
+  const handlePickGrade = async (grade: (typeof DIAGNOSTIC_GRADE_OPTIONS)[number]) => {
     setSavingGrade(true);
     try {
       await updateProfileGrade(userId, grade);
@@ -283,7 +285,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
           <p className="text-sm text-muted-foreground">先告诉我你的年级，我来出对应的题。</p>
         </header>
         <div className="grid grid-cols-2 gap-2">
-          {GRADE_OPTIONS.map((g) => (
+          {DIAGNOSTIC_GRADE_OPTIONS.map((g) => (
             <button
               key={g}
               type="button"

@@ -30,18 +30,34 @@ export const DIAGNOSTIC_DIFFICULTY_OPTIONS: {
 ];
 
 /** Minimum successfully generated questions before starting a quiz round. */
-export const MIN_DIAGNOSTIC_QUESTIONS = 4;
+export const MIN_DIAGNOSTIC_QUESTIONS = 3;
+
+const REQUEST_TIMEOUT_MS_DEFAULT = 10_000;
+const REQUEST_TIMEOUT_MS_HARD = 15_000;
+
+const SIMPLER_RETRY_HINT =
+  "请出一道更简单的单选题，一两步可得答案，确保能输出合法 JSON。";
+
+const LATEX_FORMAT_HINT =
+  "数学公式请用LaTeX格式，行内公式用$...$包裹，例如：$y^2=2px$，$\\pm\\sqrt{2}$，$\\frac{1}{4}$。";
+
+function requestTimeoutMs(difficulty: DiagnosticDifficulty): number {
+  return difficulty === "hard" ? REQUEST_TIMEOUT_MS_HARD : REQUEST_TIMEOUT_MS_DEFAULT;
+}
 
 function diagnosticSystemPrompt(difficulty: DiagnosticDifficulty): string {
-  const complexityRule =
-    difficulty === "hard"
-      ? "2. 题目为综合题，需结合2-3个知识点，有一定推导，不要出超纲或创新题型"
-      : "2. 题目难度必须严格符合用户指定的难度要求";
+  if (difficulty === "hard") {
+    return `你是高考出题专家。出一道综合单选题，题目可以有一定难度。
+只返回一个扁平 JSON 对象，不要嵌套对象，options 只能是 4 个字符串，不要数组套数组。
+格式：
+{"knowledge_point":"知识点","question":"题目","options":["A. 选项","B. 选项","C. 选项","D. 选项"],"answer":"A","explanation":"解析"}
+答案必须正确。字符串内不要有换行或未转义引号。`;
+  }
 
   return `你是严谨的高考出题专家。出一道高考单选题。
 要求：
 1. 答案必须唯一且正确，出题前在脑中验算
-${complexityRule}
+2. 题目难度必须严格符合用户指定的难度要求
 3. 只返回JSON，不含任何其他文字
 4. JSON格式严格如下，不要有换行符在字符串内：
 {
@@ -53,14 +69,6 @@ ${complexityRule}
 }
 5. 字符串内不要有未转义的引号或换行`;
 }
-
-const LATEX_FORMAT_HINT =
-  "数学公式请用LaTeX格式，行内公式用$...$包裹，例如：$y^2=2px$，$\\pm\\sqrt{2}$，$\\frac{1}{4}$。";
-
-const REQUEST_TIMEOUT_MS = 10_000;
-
-const SIMPLER_RETRY_HINT =
-  "请出一道更简单的单选题，一两步可得答案，确保能输出合法 JSON。";
 
 /** Strip think blocks / fences / control chars, then isolate the JSON object. */
 function cleanJson(raw: string): string {
@@ -99,6 +107,69 @@ function parseOneQuestion(o: Record<string, unknown>, expectedKp?: string): Diag
   return { knowledge_point, question, options, answer, explanation };
 }
 
+/** Extract a quoted JSON string value for a field (handles basic escapes). */
+function extractQuotedJsonField(raw: string, field: string): string | null {
+  const key = `"${field}"`;
+  const idx = raw.indexOf(key);
+  if (idx === -1) return null;
+  const colon = raw.indexOf(":", idx + key.length);
+  if (colon === -1) return null;
+  let i = colon + 1;
+  while (i < raw.length && /\s/.test(raw[i])) i += 1;
+  if (raw[i] !== '"') return null;
+  i += 1;
+  let out = "";
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (ch === "\\" && i + 1 < raw.length) {
+      out += raw[i + 1];
+      i += 2;
+      continue;
+    }
+    if (ch === '"') break;
+    out += ch;
+    i += 1;
+  }
+  return out.trim() || null;
+}
+
+function extractOptionsFromRaw(raw: string): string[] | null {
+  const m = raw.match(/"options"\s*:\s*\[([\s\S]*?)\]/i);
+  if (!m) return null;
+  try {
+    const parsed = JSON.parse(`[${m[1]}]`) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const opts = parsed.slice(0, 4).map((o) => String(o).trim());
+    if (opts.length < 4 || opts.some((o) => !o)) return null;
+    return opts;
+  } catch {
+    return null;
+  }
+}
+
+/** Manual fallback when JSON.parse fails — at minimum recover question text. */
+function parseQuestionFallback(raw: string, knowledgePoint: string): DiagnosticQuestion | null {
+  console.warn("[diagnostic] attempting fallback parse", raw.slice(0, 800));
+
+  const question = extractQuotedJsonField(raw, "question");
+  if (!question) return null;
+
+  const options =
+    extractOptionsFromRaw(raw) ??
+    ["A. 见题目条件", "B. 见题目条件", "C. 见题目条件", "D. 见题目条件"];
+  const answer = normalizeAnswerLetter(extractQuotedJsonField(raw, "answer")) ?? "A";
+  const explanation =
+    extractQuotedJsonField(raw, "explanation") ?? "请参考教材或老师讲法核对本题。";
+
+  return {
+    knowledge_point: knowledgePoint,
+    question,
+    options,
+    answer,
+    explanation,
+  };
+}
+
 export function parseDiagnosticQuestionsJson(
   raw: string,
   expectedKnowledgePoints: string[],
@@ -108,7 +179,8 @@ export function parseDiagnosticQuestionsJson(
     payload = cleanJson(raw);
   } catch (e) {
     console.warn("[diagnostic] cleanJson failed", e, raw.slice(0, 400));
-    return null;
+    const fb = parseQuestionFallback(raw, expectedKnowledgePoints[0] ?? "");
+    return fb ? [fb] : null;
   }
   try {
     const parsed = JSON.parse(payload) as unknown;
@@ -124,12 +196,14 @@ export function parseDiagnosticQuestionsJson(
     }
     if (parsed && typeof parsed === "object") {
       const q = parseOneQuestion(parsed as Record<string, unknown>);
-      return q ? [q] : null;
+      if (q) return [q];
     }
   } catch (e) {
     console.warn("[diagnostic] JSON.parse failed", e, payload.slice(0, 400));
   }
-  return null;
+
+  const fb = parseQuestionFallback(raw, expectedKnowledgePoints[0] ?? "");
+  return fb ? [fb] : null;
 }
 
 async function requestQuestionForKnowledgePoint(
@@ -138,11 +212,12 @@ async function requestQuestionForKnowledgePoint(
   difficulty: DiagnosticDifficulty,
   simpler: boolean,
 ): Promise<DiagnosticQuestion | null> {
+  const latexHint = difficulty === "hard" ? "" : LATEX_FORMAT_HINT;
   const userContent = `科目：${subject}
 知识点：${knowledgePoint}
 ${DIFFICULTY_PROMPT[difficulty]}
 ${simpler ? SIMPLER_RETRY_HINT : ""}
-${LATEX_FORMAT_HINT}
+${latexHint}
 knowledge_point 必须与「${knowledgePoint}」完全一致。`;
 
   let text: string;
@@ -155,7 +230,7 @@ knowledge_point 必须与「${knowledgePoint}」完全一致。`;
       {
         model: "deepseek-chat",
         max_tokens: 2000,
-        timeoutMs: REQUEST_TIMEOUT_MS,
+        timeoutMs: requestTimeoutMs(difficulty),
       },
     );
   } catch (e) {
@@ -178,7 +253,7 @@ knowledge_point 必须与「${knowledgePoint}」完全一致。`;
       "[diagnostic] parse failed for",
       knowledgePoint,
       simpler ? "(retry)" : "",
-      text.slice(0, 600),
+      text.slice(0, 800),
     );
     return null;
   }
@@ -197,7 +272,7 @@ export async function generateDiagnosticQuestionForKnowledgePoint(
   return requestQuestionForKnowledgePoint(subject, knowledgePoint, difficulty, true);
 }
 
-/** Generate diagnostic questions in parallel; throws if too few succeed. */
+/** Generate diagnostic questions in parallel; throws only if fewer than MIN succeed. */
 export async function generateDiagnosticQuestionsForSubject(
   subject: Subject,
   knowledgePoints: string[],
@@ -225,9 +300,7 @@ export async function generateDiagnosticQuestionsForSubject(
 
   const results = settled.filter((q): q is DiagnosticQuestion => q != null);
   if (results.length < MIN_DIAGNOSTIC_QUESTIONS) {
-    throw new Error(
-      `本轮仅生成 ${results.length} 道题，至少需要 ${MIN_DIAGNOSTIC_QUESTIONS} 道，请重试`,
-    );
+    throw new Error("出题不足，请重试");
   }
   return results;
 }
