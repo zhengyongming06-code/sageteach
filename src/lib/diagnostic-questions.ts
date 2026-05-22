@@ -16,8 +16,7 @@ const DIFFICULTY_PROMPT: Record<DiagnosticDifficulty, string> = {
 出基础题，难度为高考简单题。`,
   medium: `难度要求：高考中等题，需要2-3步推导，类似高考第10-14题难度。
 出中等难度题，难度为高考中等题。`,
-  hard: `难度要求：高考压轴题，必须是高考最后2-3道大题或选择题最后2题的难度，需要多步推导和综合知识点，绝对不能出基础送分题。
-出压轴题，难度为高考最难的20%。`,
+  hard: `难度要求：综合题，需要结合2-3个知识点，有一定推导步骤，类似平时模拟卷中等偏难题，不要出超纲或创新题型。`,
 };
 
 export const DIAGNOSTIC_DIFFICULTY_OPTIONS: {
@@ -36,7 +35,7 @@ export const MIN_DIAGNOSTIC_QUESTIONS = 4;
 function diagnosticSystemPrompt(difficulty: DiagnosticDifficulty): string {
   const complexityRule =
     difficulty === "hard"
-      ? "2. 题目必须达到压轴难度，需要多步综合推理，禁止出送分基础题"
+      ? "2. 题目为综合题，需结合2-3个知识点，有一定推导，不要出超纲或创新题型"
       : "2. 题目难度必须严格符合用户指定的难度要求";
 
   return `你是严谨的高考出题专家。出一道高考单选题。

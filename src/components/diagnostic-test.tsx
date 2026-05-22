@@ -14,12 +14,22 @@ import {
 } from "@/lib/knowledge-points";
 import { DiagnosticMathText } from "@/components/diagnostic-math-text";
 import {
-  DIAGNOSTIC_DIFFICULTY_OPTIONS,
   generateDiagnosticQuestionsForSubject,
   isAnswerCorrect,
   type DiagnosticDifficulty,
   type DiagnosticQuestion,
 } from "@/lib/diagnostic-questions";
+
+/** UI labels shown in the difficulty picker (honest, non-exaggerated). */
+const DIAGNOSTIC_DIFFICULTY_UI: {
+  id: DiagnosticDifficulty;
+  title: string;
+  description: string;
+}[] = [
+  { id: "easy", title: "基础", description: "基础题，找出知识漏洞" },
+  { id: "medium", title: "中等", description: "中等难度，模拟日常练习水平" },
+  { id: "hard", title: "较难", description: "综合题，多知识点结合" },
+];
 import { saveDiagnosticResults, type DiagnosticAnswerRow } from "@/lib/diagnostic-db";
 import { diagnosticEligibilityQueryKey } from "@/lib/diagnostic-eligibility";
 import {
@@ -176,7 +186,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
   );
 
   const difficultyLabel =
-    DIAGNOSTIC_DIFFICULTY_OPTIONS.find((d) => d.id === difficulty)?.title ?? null;
+    DIAGNOSTIC_DIFFICULTY_UI.find((d) => d.id === difficulty)?.title ?? null;
 
   const current = questions[qIndex];
 
@@ -310,7 +320,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
           ← 更换年级
         </button>
         <div className="space-y-3">
-          {DIAGNOSTIC_DIFFICULTY_OPTIONS.map((opt) => (
+          {DIAGNOSTIC_DIFFICULTY_UI.map((opt) => (
             <button
               key={opt.id}
               type="button"
