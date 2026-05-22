@@ -45,16 +45,26 @@ export function getKnowledgePointsForSubject(subject: Subject): readonly string[
   return SUBJECT_KNOWLEDGE_POINTS[subject];
 }
 
-/** All catalog knowledge points for one subject (full diagnostic coverage). */
+/** Questions per diagnostic session (subset of catalog). */
+export const DIAGNOSTIC_QUESTION_COUNT = 5;
+
+/** All catalog knowledge points for one subject. */
 export function getKnowledgePointsForDiagnosticCoverage(subject: Subject): string[] {
   return [...SUBJECT_KNOWLEDGE_POINTS[subject]];
 }
 
-export function diagnosticQuestionCountForSubject(subject: Subject): number {
-  return SUBJECT_KNOWLEDGE_POINTS[subject].length;
+/** Pick knowledge points for a diagnostic run (default 5 per subject). */
+export function getKnowledgePointsForDiagnostic(
+  subject: Subject,
+  count: number = DIAGNOSTIC_QUESTION_COUNT,
+): string[] {
+  return pickKnowledgePointsForDiagnostic(subject, count);
 }
 
-/** @deprecated Use getKnowledgePointsForDiagnosticCoverage for full-subject tests. */
+export function diagnosticQuestionCountForSubject(_subject: Subject): number {
+  return DIAGNOSTIC_QUESTION_COUNT;
+}
+
 export function pickKnowledgePointsForDiagnostic(subject: Subject, count: number): string[] {
   const pool = getKnowledgePointsForDiagnosticCoverage(subject);
   for (let i = pool.length - 1; i > 0; i--) {

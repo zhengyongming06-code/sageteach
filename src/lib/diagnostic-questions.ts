@@ -1,7 +1,4 @@
-import {
-  invokeDeepSeekChat,
-  type DeepSeekModel,
-} from "@/lib/deepseek-supabase";
+import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
 import type { Subject } from "@/lib/subjects";
 
 export type DiagnosticDifficulty = "easy" | "medium" | "hard";
@@ -30,37 +27,35 @@ export const DIAGNOSTIC_DIFFICULTY_OPTIONS: {
   { id: "hard", title: "挑战模式", description: "压轴题难度，冲高分专用" },
 ];
 
-const DIAGNOSTIC_QUESTION_SYSTEM = `你是严谨的高考出题专家。出题前请仔细验算确保答案正确。
-只输出JSON，不要输出任何思考过程、自我怀疑或「我可能算错了」之类的内容。
-如果不确定答案，选择更简单的题目出题。
-
-根据给定的知识点，出一道高考难度的单选题。
-只返回JSON，不要 markdown 代码块，不要其他说明文字。`;
+const DIAGNOSTIC_QUESTION_SYSTEM = `你是严谨的高考出题专家。出一道高考单选题。
+要求：
+1. 答案必须唯一且正确，出题前在脑中验算
+2. 题目不要太复杂，确保能出正确答案
+3. 只返回JSON，不含任何其他文字
+4. JSON格式严格如下，不要有换行符在字符串内：
+{
+  "knowledge_point": "知识点",
+  "question": "题目",
+  "options": ["A. 选项", "B. 选项", "C. 选项", "D. 选项"],
+  "answer": "A",
+  "explanation": "解析"
+}
+5. 字符串内不要有未转义的引号或换行`;
 
 const LATEX_FORMAT_HINT =
   "数学公式请用LaTeX格式，行内公式用$...$包裹，例如：$y^2=2px$，$\\pm\\sqrt{2}$，$\\frac{1}{4}$。";
 
-const GENERATION_TIMEOUT_MS = 120_000;
-const GENERATION_BATCH_SIZE = 2;
-const GENERATION_BATCH_DELAY_MS = 500;
+const REQUEST_TIMEOUT_MS = 10_000;
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function resolveDiagnosticModel(subject: Subject): DeepSeekModel {
-  return subject === "数学" || subject === "物理" ? "deepseek-reasoner" : "deepseek-chat";
-}
-
-/** Strip R1 think blocks / markdown fences, then isolate the JSON object. */
+/** Strip think blocks / fences / control chars, then isolate the JSON object. */
 function cleanJson(raw: string): string {
   let text = raw;
-  text = text.replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, "");
   text = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
-  text = text.replace(/```json\n?/gi, "").replace(/```\n?/g, "");
+  text = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
+  text = text.replace(/[\x00-\x09\x0b-\x1f]/g, " ");
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON found");
+  if (start === -1 || end === -1) throw new Error("no JSON");
   return text.slice(start, end + 1);
 }
 
@@ -122,41 +117,35 @@ export function parseDiagnosticQuestionsJson(
   return null;
 }
 
-/** Generate one question for a single knowledge point. */
+/** Generate one question for a single knowledge point (skipped on timeout/parse failure). */
 export async function generateDiagnosticQuestionForKnowledgePoint(
   subject: Subject,
   knowledgePoint: string,
   difficulty: DiagnosticDifficulty,
-): Promise<DiagnosticQuestion> {
+): Promise<DiagnosticQuestion | null> {
   const userContent = `科目：${subject}
-
 知识点：${knowledgePoint}
-
-请针对上述知识点出一道单选题。
 难度要求：${DIFFICULTY_PROMPT[difficulty]}
 ${LATEX_FORMAT_HINT}
+knowledge_point 必须与「${knowledgePoint}」完全一致。`;
 
-只返回一个 JSON 对象（不要数组），格式：
-{
-  "knowledge_point": "${knowledgePoint}",
-  "question": "题目内容",
-  "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
-  "answer": "A",
-  "explanation": "解析"
-}`;
-
-  const model = resolveDiagnosticModel(subject);
-  const text = await invokeDeepSeekChat(
-    [
-      { role: "system", content: DIAGNOSTIC_QUESTION_SYSTEM },
-      { role: "user", content: userContent },
-    ],
-    {
-      model,
-      max_tokens: model === "deepseek-reasoner" ? 4000 : 2000,
-      timeoutMs: GENERATION_TIMEOUT_MS,
-    },
-  );
+  let text: string;
+  try {
+    text = await invokeDeepSeekChat(
+      [
+        { role: "system", content: DIAGNOSTIC_QUESTION_SYSTEM },
+        { role: "user", content: userContent },
+      ],
+      {
+        model: "deepseek-chat",
+        max_tokens: 2000,
+        timeoutMs: REQUEST_TIMEOUT_MS,
+      },
+    );
+  } catch (e) {
+    console.warn("[diagnostic] request failed, skipping", knowledgePoint, e);
+    return null;
+  }
 
   const parsed = parseDiagnosticQuestionsJson(text, [knowledgePoint]);
   const q =
@@ -170,13 +159,13 @@ ${LATEX_FORMAT_HINT}
 
   if (!q) {
     console.warn("[diagnostic] parse failed for", knowledgePoint, text.slice(0, 600));
-    throw new Error(`题目生成失败：${knowledgePoint}`);
+    return null;
   }
 
   return { ...q, knowledge_point: knowledgePoint };
 }
 
-/** Generate questions in small batches to avoid R1 rate limits. */
+/** Generate diagnostic questions in parallel; failed items are skipped. */
 export async function generateDiagnosticQuestionsForSubject(
   subject: Subject,
   knowledgePoints: string[],
@@ -188,25 +177,21 @@ export async function generateDiagnosticQuestionsForSubject(
   const total = knowledgePoints.length;
   if (total === 0) return [];
 
-  const results: DiagnosticQuestion[] = [];
   options?.onProgress?.(0, total);
+  let completed = 0;
 
-  for (let i = 0; i < total; i += GENERATION_BATCH_SIZE) {
-    const batch = knowledgePoints.slice(i, i + GENERATION_BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map((kp) =>
-        generateDiagnosticQuestionForKnowledgePoint(subject, kp, difficulty),
-      ),
-    );
-    results.push(...batchResults);
-    options?.onProgress?.(results.length, total);
+  const settled = await Promise.all(
+    knowledgePoints.map(async (kp) => {
+      try {
+        return await generateDiagnosticQuestionForKnowledgePoint(subject, kp, difficulty);
+      } finally {
+        completed += 1;
+        options?.onProgress?.(completed, total);
+      }
+    }),
+  );
 
-    if (i + GENERATION_BATCH_SIZE < total) {
-      await sleep(GENERATION_BATCH_DELAY_MS);
-    }
-  }
-
-  return results;
+  return settled.filter((q): q is DiagnosticQuestion => q != null);
 }
 
 export function letterFromOptionLabel(option: string): string {

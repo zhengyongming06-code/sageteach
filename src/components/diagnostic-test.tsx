@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { SUBJECTS, type Subject } from "@/lib/subjects";
 import { subjectBadgeClass } from "@/lib/subject-accent";
-import { getKnowledgePointsForDiagnosticCoverage } from "@/lib/knowledge-points";
+import {
+  DIAGNOSTIC_QUESTION_COUNT,
+  getKnowledgePointsForDiagnostic,
+} from "@/lib/knowledge-points";
 import { DiagnosticMathText } from "@/components/diagnostic-math-text";
 import {
   DIAGNOSTIC_DIFFICULTY_OPTIONS,
@@ -69,7 +72,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
     setShowFeedback(false);
     setAnswers([]);
 
-    const kps = getKnowledgePointsForDiagnosticCoverage(sub);
+    const kps = getKnowledgePointsForDiagnostic(sub, DIAGNOSTIC_QUESTION_COUNT);
     setGenProgress({ done: 0, total: kps.length });
 
     try {
@@ -184,7 +187,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
           <h2 className="text-xl font-semibold tracking-tight">知识点诊断</h2>
           <p className="text-sm text-muted-foreground">
             {difficultyLabel ? `当前：${difficultyLabel} · ` : ""}
-            选一个科目，Sage 会按该科全部知识点各出一道题，找出最需要补的部分。
+            选一个科目，Sage 会抽 5 个核心知识点各出一道题，找出最需要补的部分。
           </p>
         </header>
 
@@ -242,8 +245,8 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
         </div>
         <p className="max-w-xs text-xs text-muted-foreground">
           {genProgress
-            ? `正在出题 ${genProgress.done}/${genProgress.total}...`
-            : "Sage 正在出题，约需10秒..."}
+            ? `正在出题 ${genProgress.done}/${DIAGNOSTIC_QUESTION_COUNT}...`
+            : `正在出题 0/${DIAGNOSTIC_QUESTION_COUNT}...`}
         </p>
       </div>
     );
