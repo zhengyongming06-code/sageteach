@@ -19,3 +19,8 @@ export const POST_REVIEW_SESSION_CLOSING =
 /** Closing line after the first guided onboarding summary. */
 export const POST_FIRST_ONBOARDING_SESSION_CLOSING =
   "好，今天先到这里。你的第一个卡点已经记录了。\n明天继续。";
+
+/** Sage wrap-up cues: session is ending; prefetch structured summary in the background. */
+export function isReviewWrapUpMessage(content: string): boolean {
+  return content.includes("明天复盘时") || content.includes("今晚任务");
+}

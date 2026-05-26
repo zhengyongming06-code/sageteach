@@ -43,6 +43,7 @@ import {
   POST_REVIEW_SESSION_CLOSING,
   REVIEW_GUIDED_FIRST_OPENING,
   REVIEW_RETURNING_FIRST_OPENING,
+  isReviewWrapUpMessage,
 } from "@/lib/review-opening";
 import { assistantSignalsCorrectness } from "@/lib/review-positive-feedback";
 import {
@@ -765,7 +766,8 @@ function Review() {
     }
   }, []);
 
-  const runSilentSummary = useCallback(async () => {
+  const runSilentSummary = useCallback(async (opts?: { background?: boolean }) => {
+    const background = opts?.background ?? false;
     if (!user?.id || !activeSessionSlug) {
       setIsSummarySubmitting(false);
       setIsEndingReview(false);
@@ -844,7 +846,9 @@ function Review() {
       }
 
       summaryDoneKeysRef.current.add(key);
-      setSessionCard({ kind: "loading" });
+      if (!background) {
+        setSessionCard({ kind: "loading" });
+      }
 
       clearSummaryStreamTimeout();
       summaryStreamTimeoutRef.current = setTimeout(() => {
@@ -1168,6 +1172,15 @@ function Review() {
         queryKey: ["review-messages", user.id, sessionSlug, scopeSubject],
       });
       setStreamAssistantText(null);
+
+      const userTurns = historyForApi.filter((m) => m.role === "user").length;
+      if (
+        isReviewWrapUpMessage(reply) &&
+        userTurns >= 3 &&
+        !subjectsWithEndedReview.has(scopeSubject)
+      ) {
+        void runSilentSummary({ background: true });
+      }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (scopeStale()) return;
@@ -1191,21 +1204,52 @@ function Review() {
     sprintMode,
     activeSessionSlug,
     bumpSessionScope,
+    runSilentSummary,
+    subjectsWithEndedReview,
+  ]);
+
+  const prefetchSummary = useCallback(() => {
+    if (userMessageCount < 3 || onboardingIncomplete) return;
+    if (!activeSessionSlug || subjectsWithEndedReview.has(chatSubject)) return;
+    if (summaryDoneKeysRef.current.has(activeSessionSlug) || summaryInFlightRef.current) {
+      return;
+    }
+    void runSilentSummary({ background: true });
+  }, [
+    userMessageCount,
+    onboardingIncomplete,
+    activeSessionSlug,
+    subjectsWithEndedReview,
+    chatSubject,
+    runSilentSummary,
   ]);
 
   const onEndReviewClick = useCallback(() => {
-    if (
-      userMessageCount < 3 ||
-      isSummarySubmitting ||
-      summaryInFlightRef.current ||
-      subjectsWithEndedReview.has(chatSubject)
-    ) {
+    if (userMessageCount < 3 || subjectsWithEndedReview.has(chatSubject)) {
       return;
     }
     if (!activeSessionSlug) return;
-    if (summaryDoneKeysRef.current.has(activeSessionSlug)) return;
 
     setSubjectsWithEndedReview((prev) => new Set(prev).add(chatSubject));
+
+    if (summaryDoneKeysRef.current.has(activeSessionSlug)) {
+      if (sessionCard?.kind !== "full" && sessionCard?.kind !== "streaming") {
+        setSessionCard({ kind: "loading" });
+      }
+      setIsSummarySubmitting(summaryInFlightRef.current);
+      setIsEndingReview(summaryInFlightRef.current);
+      return;
+    }
+
+    if (summaryInFlightRef.current) {
+      setIsSummarySubmitting(true);
+      setIsEndingReview(true);
+      if (sessionCard?.kind !== "streaming" && sessionCard?.kind !== "full") {
+        setSessionCard({ kind: "loading" });
+      }
+      return;
+    }
+
     setIsSummarySubmitting(true);
     setIsEndingReview(true);
     setSessionCard({ kind: "loading" });
@@ -1213,10 +1257,10 @@ function Review() {
   }, [
     userMessageCount,
     runSilentSummary,
-    isSummarySubmitting,
     subjectsWithEndedReview,
     chatSubject,
     activeSessionSlug,
+    sessionCard?.kind,
   ]);
 
   const onRetrySummary = useCallback(() => {
@@ -1364,6 +1408,7 @@ function Review() {
       showHistorySkeleton={showHistorySkeleton}
       streamingAssistantText={streamAssistantText}
       composerHint={chatRetrying ? "重试中…" : null}
+      onWrapUpDetected={prefetchSummary}
       betweenScrollAndInput={
         showEndReviewButton ? (
           <Button

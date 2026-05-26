@@ -1,21 +1,78 @@
 import { SUBJECTS } from "@/lib/subjects";
 import { cn } from "@/lib/utils";
 
-/** Left-border + soft background tint per subject (timeline / summary card). */
-const ACCENTS: Record<string, string> = {
-  语文: "border-l-amber-500 bg-amber-500/[0.06]",
-  数学: "border-l-sky-500 bg-sky-500/[0.06]",
-  英语: "border-l-violet-500 bg-violet-500/[0.06]",
-  物理: "border-l-emerald-500 bg-emerald-500/[0.06]",
-  化学: "border-l-orange-500 bg-orange-500/[0.06]",
-  生物: "border-l-lime-600 bg-lime-600/[0.06]",
-  政治: "border-l-rose-500 bg-rose-500/[0.06]",
-  历史: "border-l-stone-500 bg-stone-500/[0.08]",
-  地理: "border-l-cyan-600 bg-cyan-600/[0.06]",
+/** Per-subject accent color (left gradient bar) + soft background tint. */
+const ACCENTS: Record<string, { color: string; bg: string; gradient: string }> = {
+  语文: {
+    color: "#f59e0b",
+    bg: "bg-amber-500/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#f59e0b,transparent)]",
+  },
+  数学: {
+    color: "#0ea5e9",
+    bg: "bg-sky-500/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#0ea5e9,transparent)]",
+  },
+  英语: {
+    color: "#8b5cf6",
+    bg: "bg-violet-500/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#8b5cf6,transparent)]",
+  },
+  物理: {
+    color: "#10b981",
+    bg: "bg-emerald-500/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#10b981,transparent)]",
+  },
+  化学: {
+    color: "#f97316",
+    bg: "bg-orange-500/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#f97316,transparent)]",
+  },
+  生物: {
+    color: "#65a30d",
+    bg: "bg-lime-600/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#65a30d,transparent)]",
+  },
+  政治: {
+    color: "#f43f5e",
+    bg: "bg-rose-500/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#f43f5e,transparent)]",
+  },
+  历史: {
+    color: "#78716c",
+    bg: "bg-stone-500/[0.08]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#78716c,transparent)]",
+  },
+  地理: {
+    color: "#0891b2",
+    bg: "bg-cyan-600/[0.06]",
+    gradient: "before:bg-[linear-gradient(to_bottom,#0891b2,transparent)]",
+  },
 };
 
+const GRADIENT_BAR =
+  "before:pointer-events-none before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:rounded-[2px] before:content-['']";
+
+const DEFAULT_ACCENT = {
+  color: "hsl(var(--primary))",
+  bg: "bg-primary/[0.06]",
+  gradient: "before:bg-[linear-gradient(to_bottom,hsl(var(--primary)),transparent)]",
+};
+
+function resolveAccent(subject: string) {
+  return ACCENTS[subject] ?? DEFAULT_ACCENT;
+}
+
+/** Weak-point / archive cards: gradient left bar + tinted background. */
 export function subjectAccentCardClass(subject: string): string {
-  return ACCENTS[subject] ?? "border-l-primary bg-primary/[0.06]";
+  const a = resolveAccent(subject);
+  return cn("relative overflow-hidden border-l-0 pl-4", a.bg, GRADIENT_BAR, a.gradient);
+}
+
+/** Today's task rows: gradient left bar only (card keeps its own background). */
+export function subjectAccentTaskClass(subject: string): string {
+  const a = resolveAccent(subject);
+  return cn("relative overflow-hidden border-l-0 pl-4", GRADIENT_BAR, a.gradient);
 }
 
 export function subjectBadgeClass(subject: string): string {

@@ -55,7 +55,7 @@ function Landing() {
 
       <main className="mx-auto max-w-5xl px-6 pb-24 pt-10 sm:pt-20">
         <div className="max-w-3xl">
-          <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-6xl">
+          <h1 className="text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
             Sage 一个帮你复盘提分的 AI
           </h1>
           <p className="mt-6 max-w-xl text-balance text-base leading-relaxed text-muted-foreground sm:text-lg">

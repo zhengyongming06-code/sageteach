@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { subjectAccentCardClass, subjectBadgeClass } from "@/lib/subject-accent";
+import { subjectAccentCardClass, subjectAccentTaskClass, subjectBadgeClass } from "@/lib/subject-accent";
 import {
   fetchWeakArchive,
   formatArchiveDateLabel,
@@ -643,7 +643,10 @@ function Today() {
             {tasks.map((t) => (
               <li
                 key={t.id}
-                className="flex gap-3 rounded-2xl border border-border bg-card/60 px-3 py-3 shadow-sm"
+                className={cn(
+                  "flex gap-3 rounded-2xl border border-border bg-card/60 px-3 py-3 shadow-sm",
+                  subjectAccentTaskClass(t.subject),
+                )}
               >
                 <Checkbox
                   id={`task-${t.id}`}

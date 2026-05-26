@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Send } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { isReviewWrapUpMessage } from "@/lib/review-opening";
 import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
 
@@ -66,7 +66,23 @@ type SageChatPanelProps = {
   streamingAssistantText?: string | null;
   /** Subtle status under the composer (e.g. retry hint). */
   composerHint?: string | null;
+  /** Last assistant message signals session wrap-up; parent can prefetch summary. */
+  onWrapUpDetected?: () => void;
 };
+
+function SendArrowIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M8 14V2M8 2L3 7M8 2L13 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function AssistantBubbleContent({
   content,
@@ -112,11 +128,13 @@ export function SageChatPanel({
   showHistorySkeleton = false,
   streamingAssistantText = null,
   composerHint = null,
+  onWrapUpDetected,
 }: SageChatPanelProps) {
   const isMobile = layout === "mobile";
   const scrollRef = useRef<HTMLDivElement>(null);
   const newBubbleRef = useRef<HTMLDivElement | null>(null);
   const knownMessageIdsRef = useRef<Set<string>>(new Set());
+  const wrapUpTriggeredIdsRef = useRef<Set<string>>(new Set());
   const [flyingUserMessageId, setFlyingUserMessageId] = useState<string | null>(null);
   const [pendingUserMessage, setPendingUserMessage] = useState<SageChatMessage | null>(null);
 
@@ -189,6 +207,15 @@ export function SageChatPanel({
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     });
   }, [displayMessages, isSending, streamingAssistantText, flyingUserMessageId]);
+
+  useEffect(() => {
+    if (!onWrapUpDetected || isSending || streamingAssistantText != null) return;
+    const last = displayMessages[displayMessages.length - 1];
+    if (last?.role !== "assistant" || !isReviewWrapUpMessage(last.content)) return;
+    if (wrapUpTriggeredIdsRef.current.has(last.id)) return;
+    wrapUpTriggeredIdsRef.current.add(last.id);
+    onWrapUpDetected();
+  }, [displayMessages, isSending, streamingAssistantText, onWrapUpDetected]);
 
   const handleSubmit = useCallback(() => {
     const text = draft.trim();
@@ -355,7 +382,7 @@ export function SageChatPanel({
                 size="icon"
                 className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full bg-[#1a1a2e] text-white hover:bg-[#1a1a2e]/90"
               >
-                <Send className="h-4 w-4" />
+                <SendArrowIcon />
               </Button>
             </div>
           </form>
@@ -385,7 +412,7 @@ export function SageChatPanel({
               size="icon"
               className="h-12 w-12 shrink-0 rounded-xl"
             >
-              <Send className="h-4 w-4" />
+              <SendArrowIcon />
             </Button>
           </form>
         )}
