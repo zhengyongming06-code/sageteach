@@ -20,6 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { subjectAccentTaskClass } from "@/lib/subject-accent";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -86,12 +87,17 @@ function formatDateLabel(ymd: string) {
   return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", weekday: "short" });
 }
 
-/** e.g. 5月14日 化学 14:30 */
+/** e.g. 5月14日 化学 14:30 — desktop sidebar / select (subject in label). */
 function formatSessionSidebarLabel(sessionDate: string, subject: string, startedAtIso: string) {
-  const [y, mo, da] = sessionDate.split("-").map(Number);
-  const t = new Date(startedAtIso);
-  const time = t.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const [, mo, da] = sessionDate.split("-").map(Number);
+  const time = formatSessionTime(startedAtIso);
   return `${mo}月${da}日 ${subject} ${time}`;
+}
+
+/** e.g. 5月26日 20:35 — mobile drawer subtitle (subject already in badge). */
+function formatSessionDateTimeLabel(sessionDate: string, startedAtIso: string) {
+  const [, mo, da] = sessionDate.split("-").map(Number);
+  return `${mo}月${da}日 ${formatSessionTime(startedAtIso)}`;
 }
 
 function formatSessionTime(startedAtIso: string) {
@@ -1515,14 +1521,14 @@ function Review() {
               ×
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]">
             {drawerSessionGroups.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">暂无复盘记录</p>
+              <p className="px-4 py-8 text-center text-sm text-muted-foreground">暂无复盘记录</p>
             ) : (
               drawerSessionGroups.map((group) => (
                 <div key={group.label} className="mb-4">
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">{group.label}</p>
-                  <ul className="space-y-2">
+                  <p className="mb-2 px-4 text-xs font-medium text-muted-foreground">{group.label}</p>
+                  <ul className="space-y-0 divide-y divide-border border-y border-border">
                     {group.rows.map((row) => {
                       const tag =
                         MOBILE_SUBJECT_TAG_STYLES[row.subject] ?? MOBILE_SUBJECT_TAG_STYLES["地理"];
@@ -1533,10 +1539,9 @@ function Review() {
                             type="button"
                             onClick={() => pickSessionFromDrawer(row)}
                             className={cn(
-                              "w-full rounded-lg border px-3 py-2.5 text-left transition",
-                              active
-                                ? "border-primary/40 bg-primary/5"
-                                : "border-border bg-white hover:bg-muted/50",
+                              "w-full border-0 border-b border-border bg-white py-3 pl-5 pr-4 text-left transition last:border-b-0",
+                              subjectAccentTaskClass(row.subject),
+                              active ? "bg-primary/5" : "hover:bg-muted/50",
                             )}
                           >
                             <div className="flex items-start justify-between gap-2">
@@ -1550,12 +1555,8 @@ function Review() {
                                 {formatSessionTime(row.started_at)}
                               </span>
                             </div>
-                            <p className="mt-1.5 line-clamp-2 text-sm text-foreground">
-                              {formatSessionSidebarLabel(
-                                row.session_date,
-                                row.subject,
-                                row.started_at,
-                              )}
+                            <p className="mt-1.5 text-sm tabular-nums text-muted-foreground">
+                              {formatSessionDateTimeLabel(row.session_date, row.started_at)}
                             </p>
                           </button>
                         </li>

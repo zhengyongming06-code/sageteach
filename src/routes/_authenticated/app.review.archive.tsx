@@ -6,7 +6,7 @@ import { ChevronLeft } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { subjectAccentCardClass, subjectBadgeClass } from "@/lib/subject-accent";
+import { subjectAccentCardClass } from "@/lib/subject-accent";
 import { KnowledgePointDiagnosisSection } from "@/components/knowledge-point-diagnosis-section";
 import { knowledgePointsQueryOptions } from "@/lib/knowledge-points-db";
 import {
@@ -157,12 +157,12 @@ function ReviewArchive() {
                         aria-label="标记卡点已解决"
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <time className="tabular-nums" dateTime={r.session_date}>
-                            {formatArchiveDateLabel(r.session_date, r.created_at)}
-                          </time>
-                          <span className={subjectBadgeClass(r.subject)}>{r.subject}</span>
-                        </div>
+                        <time
+                          className="text-xs tabular-nums text-muted-foreground"
+                          dateTime={r.session_date}
+                        >
+                          {formatArchiveDateLabel(r.session_date, r.created_at)}
+                        </time>
                         <p
                           className={cn(
                             "mt-2 text-sm font-medium text-foreground",

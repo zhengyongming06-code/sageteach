@@ -14,7 +14,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
-import { subjectAccentCardClass, subjectAccentTaskClass, subjectBadgeClass } from "@/lib/subject-accent";
+import {
+  mobileCardBleedClass,
+  sageHookCardClass,
+  subjectAccentCardClass,
+  subjectAccentTaskClass,
+} from "@/lib/subject-accent";
 import {
   fetchWeakArchive,
   formatArchiveDateLabel,
@@ -542,7 +547,10 @@ function Today() {
       </div>
 
       <section
-        className="shrink-0 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-center text-sm text-foreground shadow-sm"
+        className={cn(
+          "shrink-0 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-center text-sm text-foreground shadow-sm",
+          mobileCardBleedClass,
+        )}
         aria-label="今日进度"
       >
         {dailyProgressError ? (
@@ -564,7 +572,10 @@ function Today() {
 
       {showDiagnosticBanner ? (
         <section
-          className="relative shrink-0 rounded-3xl border border-sky-200/80 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800/50 dark:bg-sky-950/30"
+          className={cn(
+            "relative shrink-0 rounded-3xl border border-sky-200/80 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800/50 dark:bg-sky-950/30",
+            mobileCardBleedClass,
+          )}
           aria-label="知识点诊断"
         >
           <button
@@ -598,7 +609,13 @@ function Today() {
 
       {pendingFollowUp ? (
         <section
-          className="shrink-0 rounded-3xl border border-amber-200/70 bg-amber-50/90 p-4 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/30"
+          className={cn(
+            "shrink-0 bg-amber-50/90 p-4 shadow-sm dark:bg-amber-950/30",
+            sageHookCardClass,
+            "max-md:border-y max-md:border-amber-200/70 dark:max-md:border-amber-800/50",
+            "rounded-3xl border border-amber-200/70 dark:border-amber-800/50",
+            mobileCardBleedClass,
+          )}
           aria-label="Sage 跟进"
         >
           <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">Sage 在等你汇报</p>
@@ -617,7 +634,12 @@ function Today() {
       ) : null}
       */}
 
-      <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
+      <section
+        className={cn(
+          "shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm max-md:px-4",
+          mobileCardBleedClass,
+        )}
+      >
         <h2 className="text-sm font-semibold tracking-tight">今日任务</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">来自最近一次复盘的「今晚任务」，最多显示 3 条。</p>
 
@@ -639,12 +661,12 @@ function Today() {
             </Button>
           </div>
         ) : (
-          <ul className="mt-4 space-y-3">
+          <ul className="mt-4 max-md:-mx-4 max-md:divide-y max-md:divide-border max-md:border-y max-md:border-border">
             {tasks.map((t) => (
               <li
                 key={t.id}
                 className={cn(
-                  "flex gap-3 rounded-2xl border border-border bg-card/60 px-3 py-3 shadow-sm",
+                  "flex gap-3 rounded-2xl border border-border bg-card/60 px-3 py-3 shadow-sm max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:shadow-none",
                   subjectAccentTaskClass(t.subject),
                 )}
               >
@@ -653,15 +675,12 @@ function Today() {
                   checked={t.completed}
                   onCheckedChange={(v) => void toggleTaskComplete(t.id, v === true)}
                   className="mt-1 shrink-0"
-                  aria-label="标记完成"
+                  aria-label={`标记完成：${t.subject}`}
                 />
                 <label htmlFor={`task-${t.id}`} className="min-w-0 flex-1 cursor-pointer">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={subjectBadgeClass(t.subject)}>{t.subject}</span>
-                  </div>
                   <p
                     className={cn(
-                      "mt-1.5 text-sm leading-relaxed text-foreground",
+                      "text-sm leading-relaxed text-foreground",
                       t.completed && "text-muted-foreground line-through",
                     )}
                   >
@@ -674,7 +693,12 @@ function Today() {
         )}
       </section>
 
-      <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
+      <section
+        className={cn(
+          "shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm",
+          mobileCardBleedClass,
+        )}
+      >
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold tracking-tight">我的卡点档案</h2>
@@ -701,13 +725,13 @@ function Today() {
             还没有卡点记录。完成第一次复盘后，你的档案会出现在这里。
           </p>
         ) : (
-          <ul className="relative mt-4 space-y-4 border-l border-border pl-4">
+          <ul className="relative mt-4 max-md:-mx-4 max-md:space-y-0 max-md:divide-y max-md:divide-border max-md:border-y max-md:border-border max-md:pl-0 md:space-y-4 md:border-l md:border-border md:pl-4">
             {archiveRows.map((r) => (
-              <li key={r.id} className="relative">
-                <span className="absolute -left-[21px] top-3 h-2.5 w-2.5 rounded-full border-2 border-background bg-muted-foreground/50" />
+              <li key={r.id} className="relative max-md:pl-0 md:pl-0">
+                <span className="absolute -left-[21px] top-3 hidden h-2.5 w-2.5 rounded-full border-2 border-background bg-muted-foreground/50 md:block" />
                 <div
                   className={cn(
-                    "overflow-hidden rounded-2xl border border-border py-3 pl-4 pr-3 shadow-sm",
+                    "overflow-hidden rounded-2xl border border-border py-3 pl-4 pr-3 shadow-sm max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:shadow-none",
                     subjectAccentCardClass(r.subject),
                   )}
                 >
@@ -717,15 +741,15 @@ function Today() {
                       checked={r.completed}
                       onCheckedChange={(v) => onArchiveCheck(r.id, v === true)}
                       className="mt-0.5 shrink-0"
-                      aria-label="标记卡点已解决"
+                      aria-label={`标记卡点已解决：${r.subject}`}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <time className="tabular-nums" dateTime={r.session_date}>
-                          {formatArchiveDateLabel(r.session_date, r.created_at)}
-                        </time>
-                        <span className={subjectBadgeClass(r.subject)}>{r.subject}</span>
-                      </div>
+                      <time
+                        className="text-xs tabular-nums text-muted-foreground"
+                        dateTime={r.session_date}
+                      >
+                        {formatArchiveDateLabel(r.session_date, r.created_at)}
+                      </time>
                       <p
                         className={cn(
                           "mt-2 text-sm font-medium text-foreground",
