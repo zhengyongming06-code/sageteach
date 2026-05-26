@@ -8,6 +8,7 @@ import {
   diagnosticEligibilityQueryKey,
   fetchDiagnosticBannerEligible,
 } from "@/lib/diagnostic-eligibility";
+import { safeSessionGet, safeSessionSet } from "@/lib/safe-storage";
 import { Sparkles, Clock, Target, ChevronRight, X } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -25,7 +26,6 @@ import {
   formatArchiveDateLabel,
   persistTaskCompletion,
   weakArchiveQueryKey,
-  weakArchiveQueryOptions,
   type WeakArchiveRow,
 } from "@/lib/weak-archive";
 import { fetchUserExams, pickNearestExam, syncProfileNearestExam, type UserExamRow } from "@/lib/user-exams";
@@ -169,7 +169,7 @@ function Today() {
       return;
     }
     setDiagnosticBannerDismissed(
-      sessionStorage.getItem(diagnosticBannerDismissStorageKey(user.id)) === "1",
+      safeSessionGet(diagnosticBannerDismissStorageKey(user.id)) === "1",
     );
   }, [user?.id]);
 
@@ -305,13 +305,9 @@ function Today() {
     isLoading: archiveLoading,
     isError: archiveError,
   } = useQuery({
-    ...(user?.id
-      ? weakArchiveQueryOptions(user.id)
-      : {
-          queryKey: ["weak-point-archive", "__none__"] as const,
-          queryFn: async () => [] as WeakArchiveRow[],
-        }),
+    queryKey: weakArchiveQueryKey(user?.id ?? "__none__"),
     enabled: !!user?.id,
+    staleTime: 5 * 60 * 1000,
     queryFn: () =>
       raceQueryTimeout(TODAY_FETCH_MS, [], async () => {
         try {
@@ -362,7 +358,7 @@ function Today() {
 
   const dismissDiagnosticBanner = useCallback(() => {
     if (!user?.id) return;
-    sessionStorage.setItem(diagnosticBannerDismissStorageKey(user.id), "1");
+    safeSessionSet(diagnosticBannerDismissStorageKey(user.id), "1");
     setDiagnosticBannerDismissed(true);
   }, [user?.id]);
 

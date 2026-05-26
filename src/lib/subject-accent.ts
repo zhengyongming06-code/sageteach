@@ -1,91 +1,62 @@
 import { SUBJECTS } from "@/lib/subjects";
 import { cn } from "@/lib/utils";
 
-/** Per-subject accent color (left gradient bar) + soft background tint. */
-const ACCENTS: Record<string, { color: string; bg: string; gradient: string }> = {
-  语文: {
-    color: "#f59e0b",
-    bg: "bg-amber-500/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#f59e0b,transparent)]",
-  },
-  数学: {
-    color: "#0ea5e9",
-    bg: "bg-sky-500/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#0ea5e9,transparent)]",
-  },
-  英语: {
-    color: "#8b5cf6",
-    bg: "bg-violet-500/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#8b5cf6,transparent)]",
-  },
-  物理: {
-    color: "#10b981",
-    bg: "bg-emerald-500/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#10b981,transparent)]",
-  },
-  化学: {
-    color: "#f97316",
-    bg: "bg-orange-500/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#f97316,transparent)]",
-  },
-  生物: {
-    color: "#65a30d",
-    bg: "bg-lime-600/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#65a30d,transparent)]",
-  },
-  政治: {
-    color: "#f43f5e",
-    bg: "bg-rose-500/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#f43f5e,transparent)]",
-  },
-  历史: {
-    color: "#78716c",
-    bg: "bg-stone-500/[0.08]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#78716c,transparent)]",
-  },
-  地理: {
-    color: "#0891b2",
-    bg: "bg-cyan-600/[0.06]",
-    gradient: "before:bg-[linear-gradient(to_bottom,#0891b2,transparent)]",
-  },
+/** Left accent colors per subject (solid border — reliable in WeChat webview). */
+const ACCENT_BORDER: Record<string, string> = {
+  语文: "border-l-amber-500",
+  数学: "border-l-sky-500",
+  英语: "border-l-violet-500",
+  物理: "border-l-emerald-500",
+  化学: "border-l-orange-500",
+  生物: "border-l-lime-600",
+  政治: "border-l-rose-500",
+  历史: "border-l-stone-500",
+  地理: "border-l-cyan-600",
 };
 
-const GRADIENT_BAR =
-  "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:content-['']";
+const ACCENT_BG: Record<string, string> = {
+  语文: "bg-amber-500/[0.06]",
+  数学: "bg-sky-500/[0.06]",
+  英语: "bg-violet-500/[0.06]",
+  物理: "bg-emerald-500/[0.06]",
+  化学: "bg-orange-500/[0.06]",
+  生物: "bg-lime-600/[0.06]",
+  政治: "bg-rose-500/[0.06]",
+  历史: "bg-stone-500/[0.08]",
+  地理: "bg-cyan-600/[0.06]",
+};
 
-/** Today page hero: white gradient fills to phone edges (counteracts shell px-5 / pt-6). */
+/** Today page hero: white gradient fills to phone edges. */
 export const todayHeroShellClass = cn(
   "max-md:-mx-5 max-md:-mt-6 max-md:px-5 max-md:pt-6 max-md:pb-8",
-  "bg-gradient-to-b from-white to-muted/40",
+  "bg-gradient-to-b from-white to-[#eef1f5]",
 );
 
-/** Sage follow-up card on Today: amber gradient bar (matches subject accent style). */
+/** Sage follow-up card on Today. */
 export const sageHookCardClass = cn(
-  "relative overflow-hidden border-l-0 pl-5",
-  GRADIENT_BAR,
-  "before:bg-[linear-gradient(to_bottom,#f59e0b,transparent)]",
+  "border-l-[3px] border-l-amber-500 bg-amber-50/90 pl-4 dark:bg-amber-950/30",
 );
 
-const DEFAULT_ACCENT = {
-  color: "hsl(var(--primary))",
-  bg: "bg-primary/[0.06]",
-  gradient: "before:bg-[linear-gradient(to_bottom,hsl(var(--primary)),transparent)]",
-};
-
-function resolveAccent(subject: string) {
-  return ACCENTS[subject] ?? DEFAULT_ACCENT;
+function resolveBorder(subject: string) {
+  return ACCENT_BORDER[subject] ?? "border-l-primary";
 }
 
-/** Weak-point / archive cards: gradient left bar + tinted background. */
+function resolveBg(subject: string) {
+  return ACCENT_BG[subject] ?? "bg-primary/[0.06]";
+}
+
+/** Weak-point / archive cards. */
 export function subjectAccentCardClass(subject: string): string {
-  const a = resolveAccent(subject);
-  return cn("relative overflow-hidden border-l-0 pl-4", a.bg, GRADIENT_BAR, a.gradient);
+  return cn(
+    "border-l-[3px] pl-4",
+    resolveBorder(subject),
+    resolveBg(subject),
+  );
 }
 
-/** Today's task rows: gradient left bar only (card keeps its own background). */
+/** Today's task rows. */
 export function subjectAccentTaskClass(subject: string): string {
-  const a = resolveAccent(subject);
-  return cn("relative overflow-hidden border-l-0 pl-4", GRADIENT_BAR, a.gradient);
+  return cn("border-l-[3px] pl-4", resolveBorder(subject));
 }
 
 export function subjectBadgeClass(subject: string): string {

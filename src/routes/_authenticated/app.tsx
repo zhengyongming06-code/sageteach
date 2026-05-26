@@ -44,8 +44,8 @@ function AppShell() {
   return (
     <div
       className={cn(
-        "flex flex-col bg-background text-foreground",
-        isReviewChat ? "h-dvh overflow-hidden" : "min-h-screen",
+        "flex min-h-screen flex-col bg-background text-foreground",
+        isReviewChat && "h-screen max-h-screen overflow-hidden",
       )}
     >
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground md:flex">
@@ -84,18 +84,12 @@ function AppShell() {
         </div>
       </aside>
 
-      <main
-        className={cn(
-          "flex flex-1 flex-col md:pl-60",
-          isReviewChat ? "min-h-0 overflow-hidden" : "min-h-0 overflow-y-auto",
-        )}
-      >
+      <main className={cn("flex-1 md:pl-60", isReviewChat && "flex min-h-0 flex-col overflow-hidden")}>
         <div
           className={cn(
-            "mx-auto flex w-full flex-col",
             isReviewChat
-              ? "h-full min-h-0 max-w-none flex-1"
-              : "max-w-5xl px-5 pb-28 pt-6 md:pb-12 md:pt-10",
+              ? "mx-auto flex h-full min-h-0 w-full max-w-none flex-1 flex-col"
+              : "mx-auto w-full max-w-5xl px-5 pb-28 pt-6 md:pb-12 md:pt-10",
           )}
         >
           <Outlet />
