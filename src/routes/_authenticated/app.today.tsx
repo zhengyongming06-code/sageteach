@@ -15,13 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
-  gradientBorderInnerClass,
-  gradientBorderWrapperClass,
-  NEUTRAL_GRADIENT_ACCENT,
-  SAGE_HOOK_GRADIENT_ACCENT,
-  SKY_DIAGNOSTIC_GRADIENT_ACCENT,
-  subjectAccentCardClasses,
-  subjectAccentTaskClasses,
+  mobileCardBleedClass,
+  sageHookCardClass,
+  subjectAccentCardClass,
+  subjectAccentTaskClass,
 } from "@/lib/subject-accent";
 import {
   fetchWeakArchive,
@@ -498,17 +495,8 @@ function Today() {
 
   // const showDailyQuestion = summaryCountReady && !summaryCountError && (summaryCount ?? 0) > 0;
 
-  const progressGradient = {
-    wrapper: gradientBorderWrapperClass(NEUTRAL_GRADIENT_ACCENT),
-    inner: gradientBorderInnerClass(NEUTRAL_GRADIENT_ACCENT, "px-4 py-3 text-center text-sm text-foreground"),
-  };
-  const sageHookGradient = {
-    wrapper: gradientBorderWrapperClass(SAGE_HOOK_GRADIENT_ACCENT),
-    inner: gradientBorderInnerClass(SAGE_HOOK_GRADIENT_ACCENT),
-  };
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-6 bg-[#FFFFFF] max-md:gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-6 bg-[#FFFFFF]">
       <header className="shrink-0">
         <p className="text-sm text-muted-foreground">{greet}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">
@@ -558,9 +546,13 @@ function Today() {
         />
       </div>
 
-      <div className="flex flex-col gap-6 max-md:gap-0">
-      <section className={progressGradient.wrapper} aria-label="今日进度">
-        <div className={progressGradient.inner}>
+      <section
+        className={cn(
+          "shrink-0 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-center text-sm text-foreground shadow-sm",
+          mobileCardBleedClass,
+        )}
+        aria-label="今日进度"
+      >
         {dailyProgressError ? (
           <span className="text-destructive">今日进度加载失败</span>
         ) : dailyProgress != null ? (
@@ -576,15 +568,16 @@ function Today() {
             今日复盘 0 科 · 卡点攻克 0 个
           </span>
         )}
-        </div>
       </section>
 
       {showDiagnosticBanner ? (
         <section
-          className={gradientBorderWrapperClass(SKY_DIAGNOSTIC_GRADIENT_ACCENT)}
+          className={cn(
+            "relative shrink-0 rounded-3xl border border-sky-200/80 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800/50 dark:bg-sky-950/30",
+            mobileCardBleedClass,
+          )}
           aria-label="知识点诊断"
         >
-          <div className={cn(gradientBorderInnerClass(SKY_DIAGNOSTIC_GRADIENT_ACCENT), "relative")}>
           <button
             type="button"
             onClick={dismissDiagnosticBanner}
@@ -611,13 +604,20 @@ function Today() {
               稍后再说
             </Button>
           </div>
-          </div>
         </section>
       ) : null}
 
       {pendingFollowUp ? (
-        <section className={sageHookGradient.wrapper} aria-label="Sage 跟进">
-          <div className={sageHookGradient.inner}>
+        <section
+          className={cn(
+            "shrink-0 bg-amber-50/90 p-4 shadow-sm dark:bg-amber-950/30",
+            sageHookCardClass,
+            "max-md:border-y max-md:border-amber-200/70 dark:max-md:border-amber-800/50",
+            "rounded-3xl border border-amber-200/70 dark:border-amber-800/50",
+            mobileCardBleedClass,
+          )}
+          aria-label="Sage 跟进"
+        >
           <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">Sage 在等你汇报</p>
           <p className="mt-2 text-sm leading-relaxed text-amber-900/95 dark:text-amber-100/90">
             {pendingFollowUp}
@@ -625,7 +625,6 @@ function Today() {
           <Button asChild className="mt-4 rounded-xl" size="sm" variant="secondary">
             <Link to="/app/review">去复盘 →</Link>
           </Button>
-          </div>
         </section>
       ) : null}
 
@@ -635,8 +634,12 @@ function Today() {
       ) : null}
       */}
 
-      <section className={gradientBorderWrapperClass(NEUTRAL_GRADIENT_ACCENT)}>
-        <div className={gradientBorderInnerClass(NEUTRAL_GRADIENT_ACCENT)}>
+      <section
+        className={cn(
+          "shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm max-md:px-4",
+          mobileCardBleedClass,
+        )}
+      >
         <h2 className="text-sm font-semibold tracking-tight">今日任务</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">来自最近一次复盘的「今晚任务」，最多显示 3 条。</p>
 
@@ -649,7 +652,7 @@ function Today() {
         ) : tasksLoading && loadDeadlinePassed ? (
           <p className="mt-4 text-sm text-muted-foreground">任务加载较慢，请稍后再试或刷新页面。</p>
         ) : tasks.length === 0 ? (
-          <div className="mt-4 rounded-2xl border border-dashed border-border/80 bg-white/60 p-5 text-center">
+          <div className="mt-4 rounded-2xl border border-dashed border-border bg-muted/30 p-5 text-center">
             <p className="text-sm text-foreground">
               还没有今日任务。去复盘一科，Sage 会告诉你今晚该做什么。
             </p>
@@ -658,12 +661,15 @@ function Today() {
             </Button>
           </div>
         ) : (
-          <ul className="mt-4 max-md:-mx-5 md:-mx-1">
-            {tasks.map((t) => {
-              const taskStyle = subjectAccentTaskClasses(t.subject);
-              return (
-              <li key={t.id} className={taskStyle.wrapper}>
-                <div className={cn(taskStyle.inner, "flex items-start gap-3")}>
+          <ul className="mt-4 max-md:-mx-4 max-md:divide-y max-md:divide-border max-md:border-y max-md:border-border">
+            {tasks.map((t) => (
+              <li
+                key={t.id}
+                className={cn(
+                  "flex gap-3 rounded-2xl border border-border bg-card/60 px-3 py-3 shadow-sm max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:shadow-none",
+                  subjectAccentTaskClass(t.subject),
+                )}
+              >
                 <Checkbox
                   id={`task-${t.id}`}
                   checked={t.completed}
@@ -681,17 +687,18 @@ function Today() {
                     {t.tonight_task}
                   </p>
                 </label>
-                </div>
               </li>
-            );
-            })}
+            ))}
           </ul>
         )}
-        </div>
       </section>
 
-      <section className={gradientBorderWrapperClass(NEUTRAL_GRADIENT_ACCENT)}>
-        <div className={gradientBorderInnerClass(NEUTRAL_GRADIENT_ACCENT)}>
+      <section
+        className={cn(
+          "shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm",
+          mobileCardBleedClass,
+        )}
+      >
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold tracking-tight">我的卡点档案</h2>
@@ -714,18 +721,20 @@ function Today() {
         ) : archiveLoading && loadDeadlinePassed ? (
           <p className="mt-4 text-sm text-muted-foreground">档案加载较慢，请稍后再试或刷新页面。</p>
         ) : archiveRows.length === 0 ? (
-          <p className="mt-4 rounded-2xl border border-dashed border-border/80 bg-white/60 px-4 py-6 text-center text-sm text-muted-foreground">
+          <p className="mt-4 rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
             还没有卡点记录。完成第一次复盘后，你的档案会出现在这里。
           </p>
         ) : (
-          <ul className="relative mt-4 max-md:-mx-5 md:-mx-1 md:space-y-3 md:border-l md:border-border/60 md:pl-4">
-            {archiveRows.map((r) => {
-              const cardStyle = subjectAccentCardClasses(r.subject, false);
-              return (
-              <li key={r.id} className="relative md:pl-0">
+          <ul className="relative mt-4 max-md:-mx-4 max-md:space-y-0 max-md:divide-y max-md:divide-border max-md:border-y max-md:border-border max-md:pl-0 md:space-y-4 md:border-l md:border-border md:pl-4">
+            {archiveRows.map((r) => (
+              <li key={r.id} className="relative max-md:pl-0 md:pl-0">
                 <span className="absolute -left-[21px] top-3 hidden h-2.5 w-2.5 rounded-full border-2 border-background bg-muted-foreground/50 md:block" />
-                <div className={cardStyle.wrapper}>
-                <div className={cardStyle.inner}>
+                <div
+                  className={cn(
+                    "overflow-hidden rounded-2xl border border-border py-3 pl-4 pr-3 shadow-sm max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:shadow-none",
+                    subjectAccentCardClass(r.subject),
+                  )}
+                >
                   <div className="flex flex-wrap items-start gap-2">
                     <Checkbox
                       id={`arch-${r.id}`}
@@ -766,16 +775,11 @@ function Today() {
                     </div>
                   </div>
                 </div>
-                </div>
               </li>
-            );
-            })}
+            ))}
           </ul>
         )}
-        </div>
       </section>
-
-      </div>
 
       {user?.id ? (
         <ExamScheduleDialog open={examScheduleOpen} onOpenChange={setExamScheduleOpen} userId={user.id} />
