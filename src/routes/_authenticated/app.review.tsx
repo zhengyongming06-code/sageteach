@@ -20,7 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { subjectAccentTaskClass } from "@/lib/subject-accent";
+import { subjectAccentTaskClasses } from "@/lib/subject-accent";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1528,20 +1528,22 @@ function Review() {
               drawerSessionGroups.map((group) => (
                 <div key={group.label} className="mb-4">
                   <p className="mb-2 px-4 text-xs font-medium text-muted-foreground">{group.label}</p>
-                  <ul className="space-y-0 divide-y divide-border border-y border-border">
+                  <ul className="space-y-0">
                     {group.rows.map((row) => {
                       const tag =
                         MOBILE_SUBJECT_TAG_STYLES[row.subject] ?? MOBILE_SUBJECT_TAG_STYLES["地理"];
                       const active = activeSessionSlug === row.session_slug;
+                      const rowStyle = subjectAccentTaskClasses(row.subject);
                       return (
-                        <li key={row.session_slug}>
+                        <li key={row.session_slug} className={rowStyle.wrapper}>
                           <button
                             type="button"
                             onClick={() => pickSessionFromDrawer(row)}
                             className={cn(
-                              "w-full border-0 border-b border-border bg-white py-3 pl-5 pr-4 text-left transition last:border-b-0",
-                              subjectAccentTaskClass(row.subject),
-                              active ? "bg-primary/5" : "hover:bg-muted/50",
+                              "w-full text-left transition",
+                              rowStyle.inner,
+                              "py-3 pl-5 pr-4 max-md:rounded-none",
+                              active && "ring-1 ring-inset ring-primary/25",
                             )}
                           >
                             <div className="flex items-start justify-between gap-2">

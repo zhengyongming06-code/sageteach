@@ -6,7 +6,7 @@ import { ChevronLeft } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { subjectAccentCardClass } from "@/lib/subject-accent";
+import { subjectAccentCardClasses } from "@/lib/subject-accent";
 import { KnowledgePointDiagnosisSection } from "@/components/knowledge-point-diagnosis-section";
 import { knowledgePointsQueryOptions } from "@/lib/knowledge-points-db";
 import {
@@ -139,15 +139,13 @@ function ReviewArchive() {
             </p>
           ) : (
             <ul className="relative space-y-4 border-l border-border pl-4">
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const cardStyle = subjectAccentCardClasses(r.subject);
+                return (
                 <li key={r.id} className="relative">
                   <span className="absolute -left-[21px] top-3 h-2.5 w-2.5 rounded-full border-2 border-background bg-muted-foreground/50" />
-                  <div
-                    className={cn(
-                      "overflow-hidden rounded-2xl border border-border py-3 pl-4 pr-3 shadow-sm",
-                      subjectAccentCardClass(r.subject),
-                    )}
-                  >
+                  <div className={cardStyle.wrapper}>
+                  <div className={cardStyle.inner}>
                     <div className="flex flex-wrap items-start gap-2">
                       <Checkbox
                         id={`arch-page-${r.id}`}
@@ -183,8 +181,10 @@ function ReviewArchive() {
                       </div>
                     </div>
                   </div>
+                  </div>
                 </li>
-              ))}
+              );
+              })}
             </ul>
           )}
         </div>
