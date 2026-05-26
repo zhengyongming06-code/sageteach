@@ -86,15 +86,15 @@ function AppShell() {
 
       <main
         className={cn(
-          "flex min-h-0 flex-1 flex-col md:pl-60",
-          isReviewChat && "overflow-hidden",
+          "flex flex-1 flex-col md:pl-60",
+          isReviewChat ? "min-h-0 overflow-hidden" : "min-h-0 overflow-y-auto",
         )}
       >
         <div
           className={cn(
-            "mx-auto flex min-h-0 flex-1 flex-col",
+            "mx-auto flex w-full flex-col",
             isReviewChat
-              ? "h-full max-w-none"
+              ? "h-full min-h-0 max-w-none flex-1"
               : "max-w-5xl px-5 pb-28 pt-6 md:pb-12 md:pt-10",
           )}
         >

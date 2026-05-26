@@ -305,7 +305,12 @@ function Today() {
     isLoading: archiveLoading,
     isError: archiveError,
   } = useQuery({
-    ...weakArchiveQueryOptions(user!.id),
+    ...(user?.id
+      ? weakArchiveQueryOptions(user.id)
+      : {
+          queryKey: ["weak-point-archive", "__none__"] as const,
+          queryFn: async () => [] as WeakArchiveRow[],
+        }),
     enabled: !!user?.id,
     queryFn: () =>
       raceQueryTimeout(TODAY_FETCH_MS, [], async () => {
@@ -496,7 +501,7 @@ function Today() {
   // const showDailyQuestion = summaryCountReady && !summaryCountError && (summaryCount ?? 0) > 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:gap-6">
+    <div className="flex w-full flex-col md:gap-6">
       <div className={todayHeroShellClass}>
         <header className="shrink-0">
           <p className="text-sm text-muted-foreground">{greet}</p>
@@ -548,7 +553,7 @@ function Today() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 max-md:-mx-5 max-md:bg-muted/30 max-md:px-6 max-md:pb-2 max-md:pt-4 md:gap-6 md:px-0">
+      <div className="flex flex-col gap-4 max-md:bg-muted/30 max-md:px-1 max-md:pb-2 max-md:pt-4 md:gap-6">
       <section
         className="shrink-0 rounded-2xl border border-border bg-card px-4 py-3 text-center text-sm text-foreground shadow-sm"
         aria-label="今日进度"

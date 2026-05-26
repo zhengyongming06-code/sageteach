@@ -56,7 +56,7 @@ const GRADIENT_BAR =
 /** Today page hero: white gradient fills to phone edges (counteracts shell px-5 / pt-6). */
 export const todayHeroShellClass = cn(
   "max-md:-mx-5 max-md:-mt-6 max-md:px-5 max-md:pt-6 max-md:pb-8",
-  "bg-gradient-to-b from-white from-0% via-white via-[88%] to-muted/35",
+  "bg-gradient-to-b from-white to-muted/40",
 );
 
 /** Sage follow-up card on Today: amber gradient bar (matches subject accent style). */
