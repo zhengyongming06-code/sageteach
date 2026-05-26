@@ -15,10 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
-  mobileCardBleedClass,
   sageHookCardClass,
   subjectAccentCardClass,
   subjectAccentTaskClass,
+  todayHeroShellClass,
 } from "@/lib/subject-accent";
 import {
   fetchWeakArchive,
@@ -496,20 +496,21 @@ function Today() {
   // const showDailyQuestion = summaryCountReady && !summaryCountError && (summaryCount ?? 0) > 0;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-6 bg-[#FFFFFF]">
-      <header className="shrink-0">
-        <p className="text-sm text-muted-foreground">{greet}</p>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-          {examSprint ? `还有 ${examCountdownDays} 天。今天只做一件事。` : "今天，从最重要的一件事开始。"}
-        </h1>
-        {examSprint ? (
-          <span className="mt-2 inline-flex rounded-full border border-amber-400/70 bg-amber-100/90 px-3 py-0.5 text-xs font-semibold text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-50">
-            冲刺模式
-          </span>
-        ) : null}
-      </header>
+    <div className="flex min-h-0 flex-1 flex-col md:gap-6">
+      <div className={todayHeroShellClass}>
+        <header className="shrink-0">
+          <p className="text-sm text-muted-foreground">{greet}</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+            {examSprint ? `还有 ${examCountdownDays} 天。今天只做一件事。` : "今天，从最重要的一件事开始。"}
+          </h1>
+          {examSprint ? (
+            <span className="mt-2 inline-flex rounded-full border border-amber-400/70 bg-amber-100/90 px-3 py-0.5 text-xs font-semibold text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-50">
+              冲刺模式
+            </span>
+          ) : null}
+        </header>
 
-      <div className="grid shrink-0 grid-cols-3 gap-3">
+        <div className="mt-6 grid shrink-0 grid-cols-3 gap-3">
         <StatCard
           icon={Target}
           label="目标分"
@@ -544,13 +545,12 @@ function Today() {
           urgent={examUrgent}
           onOpenSchedule={() => setExamScheduleOpen(true)}
         />
+        </div>
       </div>
 
+      <div className="flex flex-col gap-4 max-md:-mx-5 max-md:bg-muted/30 max-md:px-6 max-md:pb-2 max-md:pt-4 md:gap-6 md:px-0">
       <section
-        className={cn(
-          "shrink-0 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-center text-sm text-foreground shadow-sm",
-          mobileCardBleedClass,
-        )}
+        className="shrink-0 rounded-2xl border border-border bg-card px-4 py-3 text-center text-sm text-foreground shadow-sm"
         aria-label="今日进度"
       >
         {dailyProgressError ? (
@@ -572,10 +572,7 @@ function Today() {
 
       {showDiagnosticBanner ? (
         <section
-          className={cn(
-            "relative shrink-0 rounded-3xl border border-sky-200/80 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800/50 dark:bg-sky-950/30",
-            mobileCardBleedClass,
-          )}
+          className="relative shrink-0 rounded-3xl border border-sky-200/80 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800/50 dark:bg-sky-950/30"
           aria-label="知识点诊断"
         >
           <button
@@ -610,11 +607,8 @@ function Today() {
       {pendingFollowUp ? (
         <section
           className={cn(
-            "shrink-0 bg-amber-50/90 p-4 shadow-sm dark:bg-amber-950/30",
+            "shrink-0 rounded-3xl border border-amber-200/70 bg-amber-50/90 p-4 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/30",
             sageHookCardClass,
-            "max-md:border-y max-md:border-amber-200/70 dark:max-md:border-amber-800/50",
-            "rounded-3xl border border-amber-200/70 dark:border-amber-800/50",
-            mobileCardBleedClass,
           )}
           aria-label="Sage 跟进"
         >
@@ -634,12 +628,7 @@ function Today() {
       ) : null}
       */}
 
-      <section
-        className={cn(
-          "shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm max-md:px-4",
-          mobileCardBleedClass,
-        )}
-      >
+      <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
         <h2 className="text-sm font-semibold tracking-tight">今日任务</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">来自最近一次复盘的「今晚任务」，最多显示 3 条。</p>
 
@@ -661,12 +650,12 @@ function Today() {
             </Button>
           </div>
         ) : (
-          <ul className="mt-4 max-md:-mx-4 max-md:divide-y max-md:divide-border max-md:border-y max-md:border-border">
+          <ul className="mt-4 space-y-3">
             {tasks.map((t) => (
               <li
                 key={t.id}
                 className={cn(
-                  "flex gap-3 rounded-2xl border border-border bg-card/60 px-3 py-3 shadow-sm max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:shadow-none",
+                  "flex gap-3 overflow-hidden rounded-2xl border border-border bg-card px-3 py-3 shadow-sm",
                   subjectAccentTaskClass(t.subject),
                 )}
               >
@@ -693,12 +682,7 @@ function Today() {
         )}
       </section>
 
-      <section
-        className={cn(
-          "shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm",
-          mobileCardBleedClass,
-        )}
-      >
+      <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold tracking-tight">我的卡点档案</h2>
@@ -725,13 +709,13 @@ function Today() {
             还没有卡点记录。完成第一次复盘后，你的档案会出现在这里。
           </p>
         ) : (
-          <ul className="relative mt-4 max-md:-mx-4 max-md:space-y-0 max-md:divide-y max-md:divide-border max-md:border-y max-md:border-border max-md:pl-0 md:space-y-4 md:border-l md:border-border md:pl-4">
+          <ul className="relative mt-4 space-y-3 md:space-y-4 md:border-l md:border-border md:pl-4">
             {archiveRows.map((r) => (
-              <li key={r.id} className="relative max-md:pl-0 md:pl-0">
+              <li key={r.id} className="relative md:pl-0">
                 <span className="absolute -left-[21px] top-3 hidden h-2.5 w-2.5 rounded-full border-2 border-background bg-muted-foreground/50 md:block" />
                 <div
                   className={cn(
-                    "overflow-hidden rounded-2xl border border-border py-3 pl-4 pr-3 shadow-sm max-md:rounded-none max-md:border-x-0 max-md:border-b-0 max-md:shadow-none",
+                    "overflow-hidden rounded-2xl border border-border py-3 pl-4 pr-3 shadow-sm",
                     subjectAccentCardClass(r.subject),
                   )}
                 >
@@ -780,6 +764,7 @@ function Today() {
           </ul>
         )}
       </section>
+      </div>
 
       {user?.id ? (
         <ExamScheduleDialog open={examScheduleOpen} onOpenChange={setExamScheduleOpen} userId={user.id} />

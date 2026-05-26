@@ -51,11 +51,13 @@ const ACCENTS: Record<string, { color: string; bg: string; gradient: string }> =
 };
 
 const GRADIENT_BAR =
-  "before:pointer-events-none before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[3px] before:rounded-[2px] before:content-['']";
+  "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:content-['']";
 
-/** Counteract app shell `px-5` on mobile so cards meet the screen edge. */
-export const mobileCardBleedClass =
-  "max-md:-mx-5 max-md:rounded-none max-md:border-x-0";
+/** Today page hero: white gradient fills to phone edges (counteracts shell px-5 / pt-6). */
+export const todayHeroShellClass = cn(
+  "max-md:-mx-5 max-md:-mt-6 max-md:px-5 max-md:pt-6 max-md:pb-8",
+  "bg-gradient-to-b from-white from-0% via-white via-[88%] to-muted/35",
+);
 
 /** Sage follow-up card on Today: amber gradient bar (matches subject accent style). */
 export const sageHookCardClass = cn(
