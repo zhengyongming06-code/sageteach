@@ -277,22 +277,81 @@ function Review() {
   const skipSubjectScopeEffectRef = useRef(false);
   const chatsBySubject = useRef<Record<string, SubjectChatCache>>(createChatsBySubject());
   /** Synchronous guards for async fetch / render (avoids race on fast tab switch). */
-  const currentSubjectRef = useRef(subject);
+  /** messages 与 summary 共用：切换科目时第一步更新，异步写入前必须校验。 */
+  const activeSubjectRef = useRef(subject);
   const activeSessionSlugRef = useRef<string | null>(activeSessionSlug);
-  currentSubjectRef.current = subject;
   activeSessionSlugRef.current = activeSessionSlug;
+  const historyLoadGenRef = useRef(0);
 
   /** When true, DB rows must not repopulate chat (e.g. after「结束复盘」). */
   const suppressChatMessagesSyncRef = useRef(false);
 
-  const clearChatMessagesSync = useCallback(() => {
-    setMessages([]);
-  }, []);
+  const [messageRows, setMessageRows] = useState<CoachMessageRow[]>([]);
+  const [historyFetching, setHistoryFetching] = useState(false);
 
   const applyActiveSessionSlug = useCallback((slug: string | null) => {
     activeSessionSlugRef.current = slug;
     setActiveSessionSlugState(slug);
   }, []);
+
+  /** 异步拉取历史；仅在 ref 仍指向 targetSubject 时写入 messages。 */
+  const loadHistory = useCallback(
+    async (targetSubject: string, targetSlug: string | null) => {
+      if (!user?.id || !targetSlug || suppressChatMessagesSyncRef.current) {
+        setSubjectChatLoading(false);
+        setHistoryFetching(false);
+        return;
+      }
+      const gen = ++historyLoadGenRef.current;
+      setSubjectChatLoading(true);
+      setHistoryFetching(true);
+      try {
+        const { data, error } = await supabase
+          .from("coach_messages")
+          .select("id,role,content,created_at,review_session_slug,review_subject")
+          .eq("user_id", user.id)
+          .eq("review_session_slug", targetSlug)
+          .eq("review_subject", targetSubject)
+          .in("role", ["user", "assistant"])
+          .order("created_at", { ascending: true });
+        if (historyLoadGenRef.current !== gen) return;
+        if (activeSubjectRef.current !== targetSubject) {
+          console.log("科目已切换，丢弃数据", targetSubject);
+          return;
+        }
+        if (activeSessionSlugRef.current !== targetSlug) {
+          console.log("场次已切换，丢弃数据", targetSlug);
+          return;
+        }
+        if (error) {
+          console.warn("[review-messages] loadHistory", error);
+          return;
+        }
+        const filtered = filterCoachMessagesForSession(
+          (data ?? []) as CoachMessageRow[],
+          targetSlug,
+          targetSubject,
+        );
+        const rows = filtered.map(({ id, role, content, created_at, review_session_slug }) => ({
+          id,
+          role,
+          content,
+          created_at,
+          review_session_slug,
+        }));
+        setMessageRows(rows);
+        setMessages(coachRowsToChatMessages(rows));
+      } catch (e) {
+        console.warn("[review-messages] loadHistory", e);
+      } finally {
+        if (historyLoadGenRef.current === gen) {
+          setSubjectChatLoading(false);
+          setHistoryFetching(false);
+        }
+      }
+    },
+    [user?.id],
+  );
 
   const { data: profileFlags, isSuccess: profileFlagsReady } = useQuery({
     queryKey: ["profile-flags", user?.id],
@@ -342,6 +401,120 @@ function Review() {
     setChatRetrying(false);
   }, []);
 
+  const clearSummaryStreamTimeout = useCallback(() => {
+    if (summaryStreamTimeoutRef.current) {
+      clearTimeout(summaryStreamTimeoutRef.current);
+      summaryStreamTimeoutRef.current = null;
+    }
+  }, []);
+
+  const isSubjectScopeCurrent = useCallback((targetSubject: string, targetSlug: string | null) => {
+    if (activeSubjectRef.current !== targetSubject) return false;
+    if (targetSlug != null && activeSessionSlugRef.current !== targetSlug) return false;
+    return true;
+  }, []);
+
+  /** 切换科目/场次：同步清空所有与当前科相关的 UI 状态（调用前须已更新 activeSubjectRef）。 */
+  const clearSubjectScopedUi = useCallback(() => {
+      historyLoadGenRef.current += 1;
+      suppressChatMessagesSyncRef.current = false;
+      summaryCardScopeRef.current = null;
+      clearSummaryStreamTimeout();
+      sendAbortRef.current?.abort();
+      sendAbortRef.current = null;
+      setMessages([]);
+      setMessageRows([]);
+      setSessionCard(null);
+      setSubjectChatLoading(true);
+      setHistoryFetching(false);
+      setIsSummarySubmitting(false);
+      setIsEndingReview(false);
+      setStreamAssistantText(null);
+      setDraft("");
+      setPendingImage((prev) => {
+        revokePendingChatImage(prev);
+        return null;
+      });
+      setStreamingPhotoMarkdown(null);
+      setPhotoAnalysisLoading(false);
+      setIsSending(false);
+      setChatRetrying(false);
+  }, [clearSummaryStreamTimeout]);
+
+  const pinSummaryCardScope = useCallback(
+    (scopeSubject: string, sessionDate: string, sessionSlug: string) => {
+      summaryCardScopeRef.current = {
+        subject: scopeSubject,
+        sessionDate,
+        sessionSlug,
+      };
+    },
+    [],
+  );
+
+  /** 若该场次已有小结，异步加载；写入前校验科目/场次未变。 */
+  const loadExistingSummary = useCallback(
+    async (targetSubject: string, targetSlug: string | null, sessionDate: string) => {
+      if (!user?.id || !targetSlug) return;
+      try {
+        const existing = await findExistingReviewSummary(targetSlug, supabase);
+        if (activeSubjectRef.current !== targetSubject) {
+          console.log("summary: 科目已切换，丢弃", targetSubject);
+          return;
+        }
+        if (!isSubjectScopeCurrent(targetSubject, targetSlug)) {
+          console.log("summary: 科目已切换，丢弃", targetSubject);
+          return;
+        }
+        if (!existing) return;
+        if (activeSubjectRef.current !== targetSubject) {
+          console.log("summary: 科目已切换，丢弃", targetSubject);
+          return;
+        }
+        console.log("[review-summary] loaded existing summary for session", {
+          sessionSlug: targetSlug,
+          subject: existing.subject,
+        });
+        setSessionCard({
+          kind: "full",
+          subject: existing.subject,
+          weak_point: existing.weak_point,
+          tonight_task: existing.tonight_task,
+          follow_up: existing.follow_up,
+          mastered: existing.mastered,
+        });
+        pinSummaryCardScope(targetSubject, sessionDate, targetSlug);
+        summaryDoneKeysRef.current.add(targetSlug);
+        setSubjectsWithEndedReview((prev) => new Set(prev).add(targetSubject));
+      } catch (e) {
+        console.warn("[review-summary] loadExistingSummary", e);
+      }
+    },
+    [user?.id, isSubjectScopeCurrent, pinSummaryCardScope],
+  );
+
+  /** 切换科目：第一步更新 activeSubjectRef，同步清空 messages/summary，再异步加载。 */
+  const handleSubjectChange = useCallback(
+    (newSubject: string, slug: string | null, date: string) => {
+      activeSubjectRef.current = newSubject;
+      console.log("切换科目，清空messages");
+      setMessages([]);
+      setSessionCard(null);
+      clearSubjectScopedUi();
+      setSubject(newSubject);
+      setSelectedDate(date);
+      applyActiveSessionSlug(slug);
+      void loadHistory(newSubject, slug);
+      void loadExistingSummary(newSubject, slug, date);
+    },
+    [
+      clearSubjectScopedUi,
+      applyActiveSessionSlug,
+      loadHistory,
+      loadExistingSummary,
+    ],
+  );
+
   const handleImageSelected = useCallback((image: PendingChatImage) => {
     setPendingImage((prev) => {
       revokePendingChatImage(prev);
@@ -358,56 +531,27 @@ function Review() {
 
   const clearCurrentSubjectChat = useCallback(() => {
     if (onboardingIncomplete) return;
-    suppressChatMessagesSyncRef.current = false;
-    clearChatMessagesSync();
-    setSubjectChatLoading(true);
     chatsBySubject.current[subject] = emptySubjectChatCache();
     bumpSessionScope();
     resetChatUiForScopeChange();
-    applyActiveSessionSlug(null);
-    setSelectedDate(localYmd());
-    if (user?.id) {
-      void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
-    }
+    handleSubjectChange(subject, null, localYmd());
   }, [
     subject,
     onboardingIncomplete,
-    clearChatMessagesSync,
-    applyActiveSessionSlug,
+    handleSubjectChange,
     bumpSessionScope,
     resetChatUiForScopeChange,
-    user?.id,
-    qc,
   ]);
 
   const loadSessionFromPicker = useCallback(
     (row: { subject: string; session_date: string; session_slug: string }) => {
-      suppressChatMessagesSyncRef.current = false;
-      clearChatMessagesSync();
       preserveSessionFromPickerRef.current = true;
       slugNavSourceRef.current = "sidebar";
-      currentSubjectRef.current = row.subject;
-      setSubjectChatLoading(true);
       bumpSessionScope();
       resetChatUiForScopeChange();
-      setSubject(row.subject);
-      setSelectedDate(row.session_date);
-      applyActiveSessionSlug(row.session_slug);
-      if (user?.id) {
-        void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
-        void qc.invalidateQueries({
-          queryKey: ["review-messages", user.id, row.session_slug, row.subject],
-        });
-      }
+      handleSubjectChange(row.subject, row.session_slug, row.session_date);
     },
-    [
-      clearChatMessagesSync,
-      applyActiveSessionSlug,
-      bumpSessionScope,
-      resetChatUiForScopeChange,
-      user?.id,
-      qc,
-    ],
+    [handleSubjectChange, bumpSessionScope, resetChatUiForScopeChange],
   );
 
   const { data: examRows = [] } = useQuery({
@@ -435,13 +579,18 @@ function Review() {
     if (profileFlags?.needsGuidedReviewOnboarding === true) {
       slugResolveGenRef.current += 1;
       applyActiveSessionSlug(null);
+      activeSubjectRef.current = ONBOARDING_REVIEW_SUBJECT;
       setSubject(ONBOARDING_REVIEW_SUBJECT);
       setSelectedDate(localYmd());
     }
-  }, [profileFlagsReady, profileFlags?.needsGuidedReviewOnboarding]);
+  }, [profileFlagsReady, profileFlags?.needsGuidedReviewOnboarding, applyActiveSessionSlug]);
+
+  const prevSubjectForScopeRef = useRef(subject);
 
   useEffect(() => {
     if (onboardingIncomplete) return;
+    if (prevSubjectForScopeRef.current === subject) return;
+    prevSubjectForScopeRef.current = subject;
     if (preserveSessionFromPickerRef.current) {
       preserveSessionFromPickerRef.current = false;
       return;
@@ -450,37 +599,16 @@ function Review() {
       skipSubjectScopeEffectRef.current = false;
       return;
     }
-    suppressChatMessagesSyncRef.current = false;
-    clearChatMessagesSync();
-    setSubjectChatLoading(true);
     bumpSessionScope();
     resetChatUiForScopeChange();
-    applyActiveSessionSlug(null);
-    setSelectedDate(localYmd());
-    if (user?.id) {
-      void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
-    }
+    handleSubjectChange(subject, null, localYmd());
   }, [
     subject,
     onboardingIncomplete,
-    clearChatMessagesSync,
-    applyActiveSessionSlug,
+    handleSubjectChange,
     bumpSessionScope,
     resetChatUiForScopeChange,
-    user?.id,
-    qc,
   ]);
-
-  const pinSummaryCardScope = useCallback(
-    (scopeSubject: string, sessionDate: string, sessionSlug: string) => {
-      summaryCardScopeRef.current = {
-        subject: scopeSubject,
-        sessionDate,
-        sessionSlug,
-      };
-    },
-    [],
-  );
 
   /** Clear summary only when leaving the pinned session scope (not when submit finishes). */
   useEffect(() => {
@@ -572,14 +700,14 @@ function Review() {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["review-prior-any", uid] }),
         qc.invalidateQueries({ queryKey: ["review-sessions-index", uid] }),
-        qc.invalidateQueries({ queryKey: ["review-messages", uid, openingSlug, sub] }),
       ]);
+      handleSubjectChange(sub, openingSlug, dt);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [user?.id, hasAnyReviewMessages, profileFlagsReady, onboardingIncomplete, qc]);
+  }, [user?.id, hasAnyReviewMessages, profileFlagsReady, onboardingIncomplete, qc, handleSubjectChange, applyActiveSessionSlug]);
 
   const { data: sessionIndex = [] } = useQuery({
     queryKey: ["review-sessions-index", user?.id],
@@ -649,6 +777,31 @@ function Review() {
     },
   });
 
+  const initialSlugHydratedRef = useRef(false);
+  useEffect(() => {
+    if (onboardingIncomplete || initialSlugHydratedRef.current || activeSessionSlug) return;
+    const cached = chatsBySubject.current[subject];
+    let slug = cached?.activeSessionSlug ?? null;
+    let date = cached?.selectedDate ?? localYmd();
+    if (!slug) {
+      const latest = sessionIndex.find((s) => s.subject === chatSubject);
+      if (latest) {
+        slug = latest.session_slug;
+        date = latest.session_date;
+      }
+    }
+    if (!slug) return;
+    initialSlugHydratedRef.current = true;
+    handleSubjectChange(chatSubject, slug, date);
+  }, [
+    sessionIndex,
+    chatSubject,
+    subject,
+    onboardingIncomplete,
+    activeSessionSlug,
+    handleSubjectChange,
+  ]);
+
   const filteredSessionRows = useMemo(() => {
     if (sidebarSessionFilter === "全部") return sessionIndex;
     return sessionIndex.filter((s) => s.subject === sidebarSessionFilter);
@@ -659,103 +812,7 @@ function Review() {
     [sessionIndex, selectedDate, chatSubject],
   );
 
-  const {
-    data: messageRowsRaw,
-    isPending: messagesPending,
-    isFetching: messagesFetching,
-  } = useQuery({
-    queryKey: ["review-messages", user?.id, activeSessionSlug, chatSubject],
-    enabled: !!user?.id && !!activeSessionSlug,
-    placeholderData: undefined,
-    queryFn: async (): Promise<CoachMessageRow[]> => {
-      const slug = activeSessionSlug as string;
-      const requestedSubject = chatSubject;
-      const subjectAtQueryTime = requestedSubject;
-      const slugAtQueryTime = slug;
-      try {
-        const { data, error } = await supabase
-          .from("coach_messages")
-          .select("id,role,content,created_at,review_session_slug,review_subject")
-          .eq("user_id", user!.id)
-          .eq("review_session_slug", slug)
-          .eq("review_subject", requestedSubject)
-          .in("role", ["user", "assistant"])
-          .order("created_at", { ascending: true });
-        if (
-          currentSubjectRef.current !== subjectAtQueryTime ||
-          activeSessionSlugRef.current !== slugAtQueryTime
-        ) {
-          return [];
-        }
-        if (error) {
-          console.warn("[review-messages]", error);
-          return [];
-        }
-        const rows = (data ?? []) as CoachMessageRow[];
-        const filtered = filterCoachMessagesForSession(rows, slug, requestedSubject);
-        if (
-          currentSubjectRef.current !== subjectAtQueryTime ||
-          activeSessionSlugRef.current !== slugAtQueryTime
-        ) {
-          return [];
-        }
-        return filtered.map(({ id, role, content, created_at, review_session_slug }) => ({
-          id,
-          role,
-          content,
-          created_at,
-          review_session_slug,
-        }));
-      } catch (e) {
-        console.warn("[review-messages]", e);
-        return [];
-      }
-    },
-  });
-
-  /** Never show cached messages from another session while slug is clearing or switching. */
-  const messageRows =
-    activeSessionSlug && messageRowsRaw
-      ? filterCoachMessagesForSession(messageRowsRaw, activeSessionSlug, chatSubject)
-      : [];
-
-  const showHistorySkeleton =
-    subjectChatLoading ||
-    (!!activeSessionSlug &&
-      messages.length === 0 &&
-      (messagesPending || messagesFetching));
-
-  /** Apply DB rows to messages state; never while subject/session scope is loading. */
-  useEffect(() => {
-    if (suppressChatMessagesSyncRef.current) return;
-    if (currentSubjectRef.current !== subject) return;
-    if (activeSessionSlugRef.current !== activeSessionSlug) return;
-
-    if (subjectChatLoading) {
-      if (!activeSessionSlug) {
-        setSubjectChatLoading(false);
-        return;
-      }
-      if (messagesPending || messagesFetching) return;
-      setMessages(coachRowsToChatMessages(messageRows));
-      setSubjectChatLoading(false);
-      return;
-    }
-
-    if (!activeSessionSlug) {
-      setMessages([]);
-      return;
-    }
-
-    setMessages(coachRowsToChatMessages(messageRows));
-  }, [
-    subject,
-    activeSessionSlug,
-    messageRows,
-    subjectChatLoading,
-    messagesPending,
-    messagesFetching,
-  ]);
+  const showHistorySkeleton = subjectChatLoading || historyFetching;
 
   const userMessageCount = useMemo(
     () => messageRows.filter((m) => m.role === "user").length,
@@ -778,17 +835,7 @@ function Review() {
     (nextSubject: string) => {
       if (onboardingIncomplete || nextSubject === subject) return;
 
-      suppressChatMessagesSyncRef.current = false;
-      clearChatMessagesSync();
-      currentSubjectRef.current = nextSubject;
-      setSubjectChatLoading(true);
-      if (user?.id) {
-        void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
-      }
       bumpSessionScope();
-
-      summaryCardScopeRef.current = null;
-      setSessionCard(null);
 
       chatsBySubject.current[subject] = subjectsWithEndedReview.has(subject)
         ? emptySubjectChatCache()
@@ -805,8 +852,6 @@ function Review() {
         const freshSlug = crypto.randomUUID();
         const today = localYmd();
         resetChatUiForScopeChange();
-        summaryCardScopeRef.current = null;
-        setSessionCard(null);
         chatsBySubject.current[nextSubject] = {
           messages: [],
           messageRows: [],
@@ -820,14 +865,7 @@ function Review() {
           return next;
         });
         skipSubjectScopeEffectRef.current = true;
-        setSubject(nextSubject);
-        setSelectedDate(today);
-        applyActiveSessionSlug(freshSlug);
-        if (user?.id) {
-          void qc.invalidateQueries({
-            queryKey: ["review-messages", user.id, freshSlug, nextSubject],
-          });
-        }
+        handleSubjectChange(nextSubject, freshSlug, today);
         return;
       }
 
@@ -844,22 +882,7 @@ function Review() {
 
       skipSubjectScopeEffectRef.current = true;
       resetChatUiForScopeChange();
-      setSubject(nextSubject);
-      setSelectedDate(date);
-      applyActiveSessionSlug(slug);
-
-      if (user?.id && slug) {
-        void qc.invalidateQueries({
-          queryKey: ["review-messages", user.id, slug, nextSubject],
-        });
-      }
-
-      if (cached.sessionCard && cached.activeSessionSlug === slug) {
-        setSessionCard(cached.sessionCard);
-        if (cached.activeSessionSlug) {
-          pinSummaryCardScope(nextSubject, date, cached.activeSessionSlug);
-        }
-      }
+      handleSubjectChange(nextSubject, slug, date);
     },
     [
       subject,
@@ -869,15 +892,12 @@ function Review() {
       selectedDate,
       sessionCard,
       sessionIndex,
-      clearChatMessagesSync,
-      applyActiveSessionSlug,
+      handleSubjectChange,
       bumpSessionScope,
       resetChatUiForScopeChange,
       onboardingIncomplete,
       subjectsWithEndedReview,
       pinSummaryCardScope,
-      user?.id,
-      qc,
     ],
   );
 
@@ -900,13 +920,6 @@ function Review() {
     [sessionIndex],
   );
 
-  const clearSummaryStreamTimeout = useCallback(() => {
-    if (summaryStreamTimeoutRef.current) {
-      clearTimeout(summaryStreamTimeoutRef.current);
-      summaryStreamTimeoutRef.current = null;
-    }
-  }, []);
-
   const runSilentSummary = useCallback(async (opts?: { background?: boolean }) => {
     const background = opts?.background ?? false;
     if (!user?.id || !activeSessionSlug) {
@@ -922,8 +935,22 @@ function Review() {
     const summarySlug = activeSessionSlug;
     const summarySubject = chatSubject;
     const summaryGen = slugResolveGenRef.current;
+    const scopeOk = () => isSubjectScopeCurrent(summarySubject, summarySlug);
+
+    const applySessionCard = (card: SessionCardState) => {
+      if (activeSubjectRef.current !== summarySubject) {
+        console.log("summary: 科目已切换，丢弃", summarySubject);
+        return;
+      }
+      if (!scopeOk()) {
+        console.log("summary: 科目已切换，丢弃", summarySubject);
+        return;
+      }
+      setSessionCard(card);
+    };
 
     const failSummary = (message: string) => {
+      if (!scopeOk()) return;
       clearSummaryStreamTimeout();
       summaryDoneKeysRef.current.delete(key);
       summaryCardScopeRef.current = null;
@@ -932,18 +959,26 @@ function Review() {
         next.delete(summarySubject);
         return next;
       });
-      setSessionCard({ kind: "error", message });
+      applySessionCard({ kind: "error", message });
     };
 
     try {
       const existing = await findExistingReviewSummary(summarySlug, supabase);
+      if (activeSubjectRef.current !== summarySubject) {
+        console.log("summary: 科目已切换，丢弃", summarySubject);
+        return;
+      }
       if (existing) {
+        if (activeSubjectRef.current !== summarySubject) {
+          console.log("summary: 科目已切换，丢弃", summarySubject);
+          return;
+        }
         console.log("[review-summary] loaded existing summary for session", {
           sessionSlug: summarySlug,
           subject: existing.subject,
         });
         summaryDoneKeysRef.current.add(key);
-        setSessionCard({
+        applySessionCard({
           kind: "full",
           subject: existing.subject,
           weak_point: existing.weak_point,
@@ -969,8 +1004,9 @@ function Review() {
         failSummary("生成失败，点击重试");
         return;
       }
-      if (slugResolveGenRef.current !== summaryGen) {
-        failSummary("生成失败，点击重试");
+      if (slugResolveGenRef.current !== summaryGen || !scopeOk()) {
+        if (!scopeOk()) console.log("summary: 科目已切换，丢弃", summarySubject);
+        else failSummary("生成失败，点击重试");
         return;
       }
 
@@ -988,7 +1024,7 @@ function Review() {
 
       summaryDoneKeysRef.current.add(key);
       if (!background) {
-        setSessionCard({ kind: "loading" });
+        applySessionCard({ kind: "loading" });
       }
 
       clearSummaryStreamTimeout();
@@ -1014,7 +1050,7 @@ function Review() {
       const flushSummaryStreamToUi = () => {
         summaryStreamRaf = 0;
         const partial = parsePartialReviewSummaryStream(pendingSummaryStream);
-        setSessionCard({
+        applySessionCard({
           kind: "streaming",
           subject: partial.subject,
           weak_point: partial.weak_point,
@@ -1040,7 +1076,7 @@ function Review() {
       if (summaryStreamRaf) cancelAnimationFrame(summaryStreamRaf);
       if (pendingSummaryStream) {
         const partial = parsePartialReviewSummaryStream(pendingSummaryStream);
-        setSessionCard({
+        applySessionCard({
           kind: "streaming",
           subject: partial.subject,
           weak_point: partial.weak_point,
@@ -1050,6 +1086,10 @@ function Review() {
         });
       }
       if (!parsed) throw new Error("parse");
+      if (!scopeOk()) {
+        console.log("summary: 科目已切换，丢弃", summarySubject);
+        return;
+      }
 
       const row = buildReviewSummaryInsertRow({
         userId: user.id,
@@ -1065,7 +1105,7 @@ function Review() {
         subject: summarySubject,
       });
 
-      setSessionCard({
+      applySessionCard({
         kind: "full",
         subject: summarySubject,
         weak_point: parsed.weak_point,
@@ -1073,6 +1113,7 @@ function Review() {
         follow_up: parsed.follow_up,
         mastered: parsed.mastered,
       });
+      if (!scopeOk()) return;
       pinSummaryCardScope(summarySubject, selectedDate, summarySlug);
 
       const { error: profileErr } = await supabase
@@ -1106,9 +1147,6 @@ function Review() {
         qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] }),
         qc.invalidateQueries({ queryKey: ["today-sage-hook", user.id] }),
         qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] }),
-        qc.invalidateQueries({
-          queryKey: ["review-messages", user.id, summarySlug, summarySubject],
-        }),
         qc.invalidateQueries({ queryKey: ["profile-flags", user.id] }),
         qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
       ]);
@@ -1154,6 +1192,7 @@ function Review() {
     activeSessionSlug,
     clearSummaryStreamTimeout,
     pinSummaryCardScope,
+    isSubjectScopeCurrent,
   ]);
 
   const send = useCallback(async () => {
@@ -1231,9 +1270,6 @@ function Review() {
       if (scopeStale()) return;
 
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({
-        queryKey: ["review-messages", user.id, sessionSlug, scopeSubject],
-      });
 
       if (imageSnapshot && photoDataUrl) {
         if (scopeStale()) return;
@@ -1290,11 +1326,9 @@ function Review() {
         if (scopeStale()) return;
 
         await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-        await qc.invalidateQueries({
-          queryKey: ["review-messages", user.id, sessionSlug, scopeSubject],
-        });
         setStreamingPhotoMarkdown(null);
         setPhotoAnalysisLoading(false);
+        if (!scopeStale()) void loadHistory(scopeSubject, sessionSlug);
         return;
       }
 
@@ -1403,10 +1437,8 @@ function Review() {
       }
 
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({
-        queryKey: ["review-messages", user.id, sessionSlug, scopeSubject],
-      });
       setStreamAssistantText(null);
+      if (!scopeStale()) void loadHistory(scopeSubject, sessionSlug);
 
       const userTurns = historyForApi.filter((m) => m.role === "user").length;
       if (
@@ -1441,10 +1473,12 @@ function Review() {
     onboardingIncomplete,
     sprintMode,
     activeSessionSlug,
+    applyActiveSessionSlug,
     bumpSessionScope,
     runSilentSummary,
     subjectsWithEndedReview,
     handleClearImage,
+    loadHistory,
   ]);
 
   const prefetchSummary = useCallback(() => {
@@ -1469,8 +1503,10 @@ function Review() {
     }
     if (!activeSessionSlug) return;
 
-    clearChatMessagesSync();
+    console.log("切换科目，清空messages");
+    setMessages([]);
     suppressChatMessagesSyncRef.current = true;
+    historyLoadGenRef.current += 1;
     setSubjectsWithEndedReview((prev) => new Set(prev).add(chatSubject));
 
     if (summaryDoneKeysRef.current.has(activeSessionSlug)) {
@@ -1497,7 +1533,6 @@ function Review() {
     void runSilentSummary();
   }, [
     userMessageCount,
-    clearChatMessagesSync,
     runSilentSummary,
     subjectsWithEndedReview,
     chatSubject,
@@ -1542,12 +1577,13 @@ function Review() {
 
       slugNavSourceRef.current = "control";
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      await qc.invalidateQueries({ queryKey: ["review-messages", user.id, newSlug, subj] });
+      activeSubjectRef.current = subj;
+      void loadHistory(subj, newSlug);
     } catch (e) {
       console.warn("[startTodaySession]", e);
       slugNavSourceRef.current = "control";
     }
-  }, [user?.id, qc, onboardingIncomplete, subject]);
+  }, [user?.id, qc, onboardingIncomplete, subject, loadHistory, applyActiveSessionSlug]);
 
   const confirmDeleteSession = useCallback(async () => {
     const row = deleteDialogSession;
@@ -1578,7 +1614,6 @@ function Review() {
       if (sErr) console.warn("[delete-session] summaries", sErr);
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] }),
-        qc.invalidateQueries({ queryKey: ["review-messages", user.id, slug, row.subject] }),
         qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] }),
         qc.invalidateQueries({ queryKey: ["today-tasks", user.id] }),
         qc.invalidateQueries({ queryKey: ["review-summary-meta", user.id] }),
@@ -1632,6 +1667,7 @@ function Review() {
 
   const renderChatPanel = (layout: "default" | "mobile") => (
     <SageChatPanel
+      key={chatSubject}
       layout={layout}
       messages={messages}
       draft={draft}
@@ -1984,16 +2020,9 @@ function Review() {
               <Select
                 value={selectedDate}
                 onValueChange={(d) => {
-                  suppressChatMessagesSyncRef.current = false;
-                  clearChatMessagesSync();
-                  setSubjectChatLoading(true);
                   bumpSessionScope();
                   resetChatUiForScopeChange();
-                  applyActiveSessionSlug(null);
-                  setSelectedDate(d);
-                  if (user?.id) {
-                    void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
-                  }
+                  handleSubjectChange(subject, null, d);
                 }}
               >
                 <SelectTrigger className="rounded-xl border-border bg-card">
