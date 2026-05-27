@@ -87,6 +87,18 @@ type CoachMessageRow = {
   review_subject?: string | null;
 };
 
+function coachRowsToChatMessages(rows: CoachMessageRow[]): SageChatMessage[] {
+  return rows
+    .filter((m): m is CoachMessageRow => typeof m.id === "string")
+    .map((m) => ({
+      id: m.id,
+      role: m.role as "user" | "assistant",
+      content: m.content,
+      photoUploaded:
+        m.role === "user" && isPhotoOnlyMessageContent(m.content) ? true : undefined,
+    }));
+}
+
 export const Route = createFileRoute("/_authenticated/app/review")({ component: Review });
 
 function localYmd(d = new Date()) {
@@ -228,6 +240,7 @@ function Review() {
   const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
   const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
   const [photoAnalysisLoading, setPhotoAnalysisLoading] = useState(false);
+  const [messages, setMessages] = useState<SageChatMessage[]>([]);
   const [subjectChatLoading, setSubjectChatLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [streamAssistantText, setStreamAssistantText] = useState<string | null>(null);
@@ -252,7 +265,7 @@ function Review() {
   subjectRef.current = subject;
   selectedDateRef.current = selectedDate;
 
-  const [activeSessionSlug, setActiveSessionSlug] = useState<string | null>(null);
+  const [activeSessionSlug, setActiveSessionSlugState] = useState<string | null>(null);
   const [chatRetrying, setChatRetrying] = useState(false);
   const [deleteDialogSession, setDeleteDialogSession] = useState<SessionRow | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -263,9 +276,23 @@ function Review() {
   const preserveSessionFromPickerRef = useRef(false);
   const skipSubjectScopeEffectRef = useRef(false);
   const chatsBySubject = useRef<Record<string, SubjectChatCache>>(createChatsBySubject());
-  /** Synchronous subject guard for message fetch / render (avoids race on fast tab switch). */
-  const activeChatSubjectRef = useRef(subject);
-  activeChatSubjectRef.current = subject;
+  /** Synchronous guards for async fetch / render (avoids race on fast tab switch). */
+  const currentSubjectRef = useRef(subject);
+  const activeSessionSlugRef = useRef<string | null>(activeSessionSlug);
+  currentSubjectRef.current = subject;
+  activeSessionSlugRef.current = activeSessionSlug;
+
+  /** When true, DB rows must not repopulate chat (e.g. after「结束复盘」). */
+  const suppressChatMessagesSyncRef = useRef(false);
+
+  const clearChatMessagesSync = useCallback(() => {
+    setMessages([]);
+  }, []);
+
+  const applyActiveSessionSlug = useCallback((slug: string | null) => {
+    activeSessionSlugRef.current = slug;
+    setActiveSessionSlugState(slug);
+  }, []);
 
   const { data: profileFlags, isSuccess: profileFlagsReady } = useQuery({
     queryKey: ["profile-flags", user?.id],
@@ -331,10 +358,13 @@ function Review() {
 
   const clearCurrentSubjectChat = useCallback(() => {
     if (onboardingIncomplete) return;
+    suppressChatMessagesSyncRef.current = false;
+    clearChatMessagesSync();
+    setSubjectChatLoading(true);
     chatsBySubject.current[subject] = emptySubjectChatCache();
     bumpSessionScope();
     resetChatUiForScopeChange();
-    setActiveSessionSlug(null);
+    applyActiveSessionSlug(null);
     setSelectedDate(localYmd());
     if (user?.id) {
       void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
@@ -342,6 +372,8 @@ function Review() {
   }, [
     subject,
     onboardingIncomplete,
+    clearChatMessagesSync,
+    applyActiveSessionSlug,
     bumpSessionScope,
     resetChatUiForScopeChange,
     user?.id,
@@ -350,22 +382,32 @@ function Review() {
 
   const loadSessionFromPicker = useCallback(
     (row: { subject: string; session_date: string; session_slug: string }) => {
+      suppressChatMessagesSyncRef.current = false;
+      clearChatMessagesSync();
       preserveSessionFromPickerRef.current = true;
       slugNavSourceRef.current = "sidebar";
-      activeChatSubjectRef.current = row.subject;
+      currentSubjectRef.current = row.subject;
       setSubjectChatLoading(true);
       bumpSessionScope();
       resetChatUiForScopeChange();
       setSubject(row.subject);
       setSelectedDate(row.session_date);
-      setActiveSessionSlug(row.session_slug);
+      applyActiveSessionSlug(row.session_slug);
       if (user?.id) {
+        void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
         void qc.invalidateQueries({
           queryKey: ["review-messages", user.id, row.session_slug, row.subject],
         });
       }
     },
-    [bumpSessionScope, resetChatUiForScopeChange, user?.id, qc],
+    [
+      clearChatMessagesSync,
+      applyActiveSessionSlug,
+      bumpSessionScope,
+      resetChatUiForScopeChange,
+      user?.id,
+      qc,
+    ],
   );
 
   const { data: examRows = [] } = useQuery({
@@ -392,7 +434,7 @@ function Review() {
     if (!profileFlagsReady) return;
     if (profileFlags?.needsGuidedReviewOnboarding === true) {
       slugResolveGenRef.current += 1;
-      setActiveSessionSlug(null);
+      applyActiveSessionSlug(null);
       setSubject(ONBOARDING_REVIEW_SUBJECT);
       setSelectedDate(localYmd());
     }
@@ -408,11 +450,26 @@ function Review() {
       skipSubjectScopeEffectRef.current = false;
       return;
     }
+    suppressChatMessagesSyncRef.current = false;
+    clearChatMessagesSync();
+    setSubjectChatLoading(true);
     bumpSessionScope();
     resetChatUiForScopeChange();
-    setActiveSessionSlug(null);
+    applyActiveSessionSlug(null);
     setSelectedDate(localYmd());
-  }, [subject, onboardingIncomplete, bumpSessionScope, resetChatUiForScopeChange]);
+    if (user?.id) {
+      void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
+    }
+  }, [
+    subject,
+    onboardingIncomplete,
+    clearChatMessagesSync,
+    applyActiveSessionSlug,
+    bumpSessionScope,
+    resetChatUiForScopeChange,
+    user?.id,
+    qc,
+  ]);
 
   const pinSummaryCardScope = useCallback(
     (scopeSubject: string, sessionDate: string, sessionSlug: string) => {
@@ -492,7 +549,7 @@ function Review() {
       slugResolveGenRef.current += 1;
       slugNavSourceRef.current = "opening";
       const openingSlug = crypto.randomUUID();
-      setActiveSessionSlug(openingSlug);
+      applyActiveSessionSlug(openingSlug);
       const opening = onboardingIncomplete
         ? REVIEW_GUIDED_FIRST_OPENING
         : REVIEW_RETURNING_FIRST_OPENING;
@@ -602,20 +659,10 @@ function Review() {
     [sessionIndex, selectedDate, chatSubject],
   );
 
-  const activeSessionKey = activeSessionSlug ?? "__pending__";
-
-  const [msgSkeletonDeadline, setMsgSkeletonDeadline] = useState(false);
-  useEffect(() => {
-    setMsgSkeletonDeadline(false);
-    const t = setTimeout(() => setMsgSkeletonDeadline(true), 2000);
-    return () => clearTimeout(t);
-  }, [activeSessionKey]);
-
   const {
     data: messageRowsRaw,
     isPending: messagesPending,
     isFetching: messagesFetching,
-    isFetched: messagesFetched,
   } = useQuery({
     queryKey: ["review-messages", user?.id, activeSessionSlug, chatSubject],
     enabled: !!user?.id && !!activeSessionSlug,
@@ -623,6 +670,8 @@ function Review() {
     queryFn: async (): Promise<CoachMessageRow[]> => {
       const slug = activeSessionSlug as string;
       const requestedSubject = chatSubject;
+      const subjectAtQueryTime = requestedSubject;
+      const slugAtQueryTime = slug;
       try {
         const { data, error } = await supabase
           .from("coach_messages")
@@ -632,7 +681,10 @@ function Review() {
           .eq("review_subject", requestedSubject)
           .in("role", ["user", "assistant"])
           .order("created_at", { ascending: true });
-        if (activeChatSubjectRef.current !== requestedSubject) {
+        if (
+          currentSubjectRef.current !== subjectAtQueryTime ||
+          activeSessionSlugRef.current !== slugAtQueryTime
+        ) {
           return [];
         }
         if (error) {
@@ -641,7 +693,10 @@ function Review() {
         }
         const rows = (data ?? []) as CoachMessageRow[];
         const filtered = filterCoachMessagesForSession(rows, slug, requestedSubject);
-        if (activeChatSubjectRef.current !== requestedSubject) {
+        if (
+          currentSubjectRef.current !== subjectAtQueryTime ||
+          activeSessionSlugRef.current !== slugAtQueryTime
+        ) {
           return [];
         }
         return filtered.map(({ id, role, content, created_at, review_session_slug }) => ({
@@ -664,54 +719,40 @@ function Review() {
       ? filterCoachMessagesForSession(messageRowsRaw, activeSessionSlug, chatSubject)
       : [];
 
-  const cachedSubjectChat = chatsBySubject.current[subject];
-  const hasCachedMessages =
-    cachedSubjectChat?.activeSessionSlug === activeSessionSlug &&
-    (cachedSubjectChat?.messages.length ?? 0) > 0;
-
   const showHistorySkeleton =
     subjectChatLoading ||
-    (!msgSkeletonDeadline &&
-      !!activeSessionSlug &&
-      (messagesPending || messagesFetching) &&
-      messageRows.length === 0 &&
-      !hasCachedMessages);
+    (!!activeSessionSlug &&
+      messages.length === 0 &&
+      (messagesPending || messagesFetching));
 
-  const messages: SageChatMessage[] = useMemo(() => {
-    if (subjectChatLoading || subject !== activeChatSubjectRef.current) {
-      return [];
-    }
-    const fromRows = messageRows
-      .filter((m): m is CoachMessageRow => typeof m.id === "string")
-      .map((m) => ({
-        id: m.id,
-        role: m.role as "user" | "assistant",
-        content: m.content,
-        photoUploaded:
-          m.role === "user" && isPhotoOnlyMessageContent(m.content) ? true : undefined,
-      }));
-    if (fromRows.length > 0) return fromRows;
-    const cached = chatsBySubject.current[subject];
-    if (
-      cached?.activeSessionSlug === activeSessionSlug &&
-      cached.messages.length > 0 &&
-      !subjectChatLoading
-    ) {
-      return cached.messages;
-    }
-    return fromRows;
-  }, [messageRows, subject, activeSessionSlug, subjectChatLoading]);
-
+  /** Apply DB rows to messages state; never while subject/session scope is loading. */
   useEffect(() => {
-    if (!subjectChatLoading) return;
-    if (subject !== activeChatSubjectRef.current) return;
-    if (!activeSessionSlug) return;
-    if (messagesPending || messagesFetching) return;
-    setSubjectChatLoading(false);
+    if (suppressChatMessagesSyncRef.current) return;
+    if (currentSubjectRef.current !== subject) return;
+    if (activeSessionSlugRef.current !== activeSessionSlug) return;
+
+    if (subjectChatLoading) {
+      if (!activeSessionSlug) {
+        setSubjectChatLoading(false);
+        return;
+      }
+      if (messagesPending || messagesFetching) return;
+      setMessages(coachRowsToChatMessages(messageRows));
+      setSubjectChatLoading(false);
+      return;
+    }
+
+    if (!activeSessionSlug) {
+      setMessages([]);
+      return;
+    }
+
+    setMessages(coachRowsToChatMessages(messageRows));
   }, [
-    subjectChatLoading,
     subject,
     activeSessionSlug,
+    messageRows,
+    subjectChatLoading,
     messagesPending,
     messagesFetching,
   ]);
@@ -737,8 +778,13 @@ function Review() {
     (nextSubject: string) => {
       if (onboardingIncomplete || nextSubject === subject) return;
 
-      activeChatSubjectRef.current = nextSubject;
+      suppressChatMessagesSyncRef.current = false;
+      clearChatMessagesSync();
+      currentSubjectRef.current = nextSubject;
       setSubjectChatLoading(true);
+      if (user?.id) {
+        void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
+      }
       bumpSessionScope();
 
       summaryCardScopeRef.current = null;
@@ -776,7 +822,7 @@ function Review() {
         skipSubjectScopeEffectRef.current = true;
         setSubject(nextSubject);
         setSelectedDate(today);
-        setActiveSessionSlug(freshSlug);
+        applyActiveSessionSlug(freshSlug);
         if (user?.id) {
           void qc.invalidateQueries({
             queryKey: ["review-messages", user.id, freshSlug, nextSubject],
@@ -800,7 +846,7 @@ function Review() {
       resetChatUiForScopeChange();
       setSubject(nextSubject);
       setSelectedDate(date);
-      setActiveSessionSlug(slug);
+      applyActiveSessionSlug(slug);
 
       if (user?.id && slug) {
         void qc.invalidateQueries({
@@ -823,6 +869,8 @@ function Review() {
       selectedDate,
       sessionCard,
       sessionIndex,
+      clearChatMessagesSync,
+      applyActiveSessionSlug,
       bumpSessionScope,
       resetChatUiForScopeChange,
       onboardingIncomplete,
@@ -1140,7 +1188,7 @@ function Review() {
       if (!sessionSlug) {
         sessionSlug = crypto.randomUUID();
         slugNavSourceRef.current = "plus";
-        setActiveSessionSlug(sessionSlug);
+        applyActiveSessionSlug(sessionSlug);
       }
 
       if (scopeStale()) return;
@@ -1421,6 +1469,8 @@ function Review() {
     }
     if (!activeSessionSlug) return;
 
+    clearChatMessagesSync();
+    suppressChatMessagesSyncRef.current = true;
     setSubjectsWithEndedReview((prev) => new Set(prev).add(chatSubject));
 
     if (summaryDoneKeysRef.current.has(activeSessionSlug)) {
@@ -1447,6 +1497,7 @@ function Review() {
     void runSilentSummary();
   }, [
     userMessageCount,
+    clearChatMessagesSync,
     runSilentSummary,
     subjectsWithEndedReview,
     chatSubject,
@@ -1477,7 +1528,7 @@ function Review() {
       slugNavSourceRef.current = "plus";
       slugResolveGenRef.current += 1;
       setSelectedDate(today);
-      setActiveSessionSlug(newSlug);
+      applyActiveSessionSlug(newSlug);
 
       const { error: iErr } = await supabase.from("coach_messages").insert({
         user_id: user.id,
@@ -1504,7 +1555,7 @@ function Review() {
     const slug = row.session_slug;
     setDeleteDialogSession(null);
     if (activeSessionSlug === slug) {
-      setActiveSessionSlug(null);
+      applyActiveSessionSlug(null);
     }
     const prevIndex =
       qc.getQueryData<SessionRow[]>(["review-sessions-index", user.id]) ?? sessionIndex;
@@ -1933,10 +1984,16 @@ function Review() {
               <Select
                 value={selectedDate}
                 onValueChange={(d) => {
+                  suppressChatMessagesSyncRef.current = false;
+                  clearChatMessagesSync();
+                  setSubjectChatLoading(true);
                   bumpSessionScope();
                   resetChatUiForScopeChange();
-                  setActiveSessionSlug(null);
+                  applyActiveSessionSlug(null);
                   setSelectedDate(d);
+                  if (user?.id) {
+                    void qc.cancelQueries({ queryKey: ["review-messages", user.id] });
+                  }
                 }}
               >
                 <SelectTrigger className="rounded-xl border-border bg-card">
