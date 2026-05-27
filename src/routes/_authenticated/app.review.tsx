@@ -21,9 +21,9 @@ import {
   wrapPhotoMarkdown,
 } from "@/lib/question-photo-analysis";
 import {
-  loadPhotoMessageImage,
+  isPhotoOnlyMessageContent,
   SAGE_PHOTO_MESSAGE_MARKER,
-  savePhotoMessageImage,
+  stripPhotoImagesFromMessages,
 } from "@/lib/review-photo-messages";
 import {
   Select,
@@ -228,7 +228,7 @@ function Review() {
   const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
   const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
   const [photoAnalysisLoading, setPhotoAnalysisLoading] = useState(false);
-  const [messagePhotoUrls, setMessagePhotoUrls] = useState<Record<string, string>>({});
+  const [subjectChatLoading, setSubjectChatLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [streamAssistantText, setStreamAssistantText] = useState<string | null>(null);
   const [sessionCard, setSessionCard] = useState<SessionCardState>(null);
@@ -263,6 +263,9 @@ function Review() {
   const preserveSessionFromPickerRef = useRef(false);
   const skipSubjectScopeEffectRef = useRef(false);
   const chatsBySubject = useRef<Record<string, SubjectChatCache>>(createChatsBySubject());
+  /** Synchronous subject guard for message fetch / render (avoids race on fast tab switch). */
+  const activeChatSubjectRef = useRef(subject);
+  activeChatSubjectRef.current = subject;
 
   const { data: profileFlags, isSuccess: profileFlagsReady } = useQuery({
     queryKey: ["profile-flags", user?.id],
@@ -349,13 +352,20 @@ function Review() {
     (row: { subject: string; session_date: string; session_slug: string }) => {
       preserveSessionFromPickerRef.current = true;
       slugNavSourceRef.current = "sidebar";
+      activeChatSubjectRef.current = row.subject;
+      setSubjectChatLoading(true);
       bumpSessionScope();
       resetChatUiForScopeChange();
       setSubject(row.subject);
       setSelectedDate(row.session_date);
       setActiveSessionSlug(row.session_slug);
+      if (user?.id) {
+        void qc.invalidateQueries({
+          queryKey: ["review-messages", user.id, row.session_slug, row.subject],
+        });
+      }
     },
-    [bumpSessionScope, resetChatUiForScopeChange],
+    [bumpSessionScope, resetChatUiForScopeChange, user?.id, qc],
   );
 
   const { data: examRows = [] } = useQuery({
@@ -612,21 +622,28 @@ function Review() {
     placeholderData: undefined,
     queryFn: async (): Promise<CoachMessageRow[]> => {
       const slug = activeSessionSlug as string;
+      const requestedSubject = chatSubject;
       try {
         const { data, error } = await supabase
           .from("coach_messages")
           .select("id,role,content,created_at,review_session_slug,review_subject")
           .eq("user_id", user!.id)
           .eq("review_session_slug", slug)
-          .eq("review_subject", chatSubject)
+          .eq("review_subject", requestedSubject)
           .in("role", ["user", "assistant"])
           .order("created_at", { ascending: true });
+        if (activeChatSubjectRef.current !== requestedSubject) {
+          return [];
+        }
         if (error) {
           console.warn("[review-messages]", error);
           return [];
         }
         const rows = (data ?? []) as CoachMessageRow[];
-        const filtered = filterCoachMessagesForSession(rows, slug, chatSubject);
+        const filtered = filterCoachMessagesForSession(rows, slug, requestedSubject);
+        if (activeChatSubjectRef.current !== requestedSubject) {
+          return [];
+        }
         return filtered.map(({ id, role, content, created_at, review_session_slug }) => ({
           id,
           role,
@@ -653,35 +670,51 @@ function Review() {
     (cachedSubjectChat?.messages.length ?? 0) > 0;
 
   const showHistorySkeleton =
-    !msgSkeletonDeadline &&
-    !!activeSessionSlug &&
-    (messagesPending || messagesFetching) &&
-    messageRows.length === 0 &&
-    !hasCachedMessages;
+    subjectChatLoading ||
+    (!msgSkeletonDeadline &&
+      !!activeSessionSlug &&
+      (messagesPending || messagesFetching) &&
+      messageRows.length === 0 &&
+      !hasCachedMessages);
 
   const messages: SageChatMessage[] = useMemo(() => {
-    const slug = activeSessionSlug;
+    if (subjectChatLoading || subject !== activeChatSubjectRef.current) {
+      return [];
+    }
     const fromRows = messageRows
       .filter((m): m is CoachMessageRow => typeof m.id === "string")
-      .map((m) => {
-        const imageUrl =
-          messagePhotoUrls[m.id] ??
-          (slug ? loadPhotoMessageImage(slug, m.id) : null) ??
-          undefined;
-        return {
-          id: m.id,
-          role: m.role as "user" | "assistant",
-          content: m.content,
-          imageUrl: imageUrl ?? undefined,
-        };
-      });
+      .map((m) => ({
+        id: m.id,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        photoUploaded:
+          m.role === "user" && isPhotoOnlyMessageContent(m.content) ? true : undefined,
+      }));
     if (fromRows.length > 0) return fromRows;
     const cached = chatsBySubject.current[subject];
-    if (cached?.activeSessionSlug === activeSessionSlug && cached.messages.length > 0) {
+    if (
+      cached?.activeSessionSlug === activeSessionSlug &&
+      cached.messages.length > 0 &&
+      !subjectChatLoading
+    ) {
       return cached.messages;
     }
     return fromRows;
-  }, [messageRows, subject, activeSessionSlug, messagePhotoUrls]);
+  }, [messageRows, subject, activeSessionSlug, subjectChatLoading]);
+
+  useEffect(() => {
+    if (!subjectChatLoading) return;
+    if (subject !== activeChatSubjectRef.current) return;
+    if (!activeSessionSlug) return;
+    if (messagesPending || messagesFetching) return;
+    setSubjectChatLoading(false);
+  }, [
+    subjectChatLoading,
+    subject,
+    activeSessionSlug,
+    messagesPending,
+    messagesFetching,
+  ]);
 
   const userMessageCount = useMemo(
     () => messageRows.filter((m) => m.role === "user").length,
@@ -691,7 +724,7 @@ function Review() {
   useEffect(() => {
     if (onboardingIncomplete) return;
     chatsBySubject.current[subject] = {
-      messages,
+      messages: stripPhotoImagesFromMessages(messages),
       messageRows,
       activeSessionSlug,
       selectedDate,
@@ -704,13 +737,17 @@ function Review() {
     (nextSubject: string) => {
       if (onboardingIncomplete || nextSubject === subject) return;
 
+      activeChatSubjectRef.current = nextSubject;
+      setSubjectChatLoading(true);
+      bumpSessionScope();
+
       summaryCardScopeRef.current = null;
       setSessionCard(null);
 
       chatsBySubject.current[subject] = subjectsWithEndedReview.has(subject)
         ? emptySubjectChatCache()
         : {
-            messages,
+            messages: stripPhotoImagesFromMessages(messages),
             messageRows,
             activeSessionSlug,
             selectedDate,
@@ -721,7 +758,6 @@ function Review() {
       if (returningAfterEndedReview) {
         const freshSlug = crypto.randomUUID();
         const today = localYmd();
-        bumpSessionScope();
         resetChatUiForScopeChange();
         summaryCardScopeRef.current = null;
         setSessionCard(null);
@@ -742,7 +778,9 @@ function Review() {
         setSelectedDate(today);
         setActiveSessionSlug(freshSlug);
         if (user?.id) {
-          qc.setQueryData(["review-messages", user.id, freshSlug, nextSubject], []);
+          void qc.invalidateQueries({
+            queryKey: ["review-messages", user.id, freshSlug, nextSubject],
+          });
         }
         return;
       }
@@ -764,8 +802,10 @@ function Review() {
       setSelectedDate(date);
       setActiveSessionSlug(slug);
 
-      if (user?.id && slug && cached.messageRows.length > 0) {
-        qc.setQueryData(["review-messages", user.id, slug, nextSubject], cached.messageRows);
+      if (user?.id && slug) {
+        void qc.invalidateQueries({
+          queryKey: ["review-messages", user.id, slug, nextSubject],
+        });
       }
 
       if (cached.sessionCard && cached.activeSessionSlug === slug) {
@@ -1136,11 +1176,6 @@ function Review() {
         .select("id")
         .single();
       if (uErr) throw uErr;
-
-      if (photoDataUrl && userRow?.id) {
-        savePhotoMessageImage(sessionSlug, userRow.id, photoDataUrl);
-        setMessagePhotoUrls((prev) => ({ ...prev, [userRow.id]: photoDataUrl! }));
-      }
 
       setDraft("");
       clearedDraft = true;

@@ -12,7 +12,10 @@ import {
 } from "@/components/chat-image-picker";
 import { PhotoAnalysisMarkdown } from "@/components/photo-analysis-markdown";
 import { unwrapPhotoMarkdown } from "@/lib/question-photo-analysis";
-import { isPhotoOnlyMessageContent } from "@/lib/review-photo-messages";
+import {
+  isPhotoOnlyMessageContent,
+  PHOTO_UPLOADED_LABEL,
+} from "@/lib/review-photo-messages";
 
 /** Block javascript:/data: and other non-http(s) schemes in assistant Markdown. */
 function markdownUrlTransform(url: string): string {
@@ -45,8 +48,10 @@ export type SageChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  /** Base64 or blob URL for user-uploaded question photos. */
+  /** Ephemeral preview URL while sending (not persisted). */
   imageUrl?: string;
+  /** Persisted image-only user message — show placeholder, not base64. */
+  photoUploaded?: boolean;
   /** Set by parent for one frame after send; panel also detects sends internally. */
   isNew?: boolean;
 };
@@ -156,17 +161,30 @@ function AssistantPhotoCardShell({
 }
 
 function UserBubbleContent({ msg }: { msg: SageChatMessage }) {
+  const isPhotoPlaceholder =
+    msg.photoUploaded === true || isPhotoOnlyMessageContent(msg.content);
+  const showPreview = Boolean(msg.imageUrl) && !isPhotoPlaceholder;
   const showText =
     msg.content.trim().length > 0 && !isPhotoOnlyMessageContent(msg.content);
 
   return (
     <div className="flex flex-col gap-2">
-      {msg.imageUrl ? (
+      {showPreview ? (
         <img
           src={msg.imageUrl}
           alt="题目图片"
           className="max-h-40 max-w-full rounded-lg object-contain"
         />
+      ) : null}
+      {isPhotoPlaceholder ? (
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm",
+            "border-white/30 bg-white/10 text-white/90",
+          )}
+        >
+          <span>{PHOTO_UPLOADED_LABEL}</span>
+        </div>
       ) : null}
       {showText ? <p className="whitespace-pre-wrap">{msg.content}</p> : null}
     </div>
@@ -213,7 +231,7 @@ export function SageChatPanel({
         m.role === "user" &&
         (m.content === pendingUserMessage.content ||
           (!!pendingUserMessage.imageUrl &&
-            (!!m.imageUrl || isPhotoOnlyMessageContent(m.content)))),
+            (m.photoUploaded === true || isPhotoOnlyMessageContent(m.content)))),
     );
     if (confirmed) return messages;
     return [...messages, pendingUserMessage];
@@ -232,7 +250,7 @@ export function SageChatPanel({
         m.role === "user" &&
         (m.content === pendingUserMessage.content ||
           (!!pendingUserMessage.imageUrl &&
-            (!!m.imageUrl || isPhotoOnlyMessageContent(m.content)))),
+            (m.photoUploaded === true || isPhotoOnlyMessageContent(m.content)))),
     );
     if (confirmed) {
       setPendingUserMessage(null);
