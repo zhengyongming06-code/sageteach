@@ -11,6 +11,21 @@ import { invokeDeepSeekChat, isRetryableNetworkFailure } from "@/lib/deepseek-su
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
+  revokePendingChatImage,
+  type PendingChatImage,
+} from "@/components/chat-image-picker";
+import { compressImageToDataUrl } from "@/lib/image-compress";
+import {
+  analyzeQuestionPhoto,
+  normalizePhotoMarkdown,
+  wrapPhotoMarkdown,
+} from "@/lib/question-photo-analysis";
+import {
+  loadPhotoMessageImage,
+  SAGE_PHOTO_MESSAGE_MARKER,
+  savePhotoMessageImage,
+} from "@/lib/review-photo-messages";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -210,6 +225,10 @@ function Review() {
   const [selectedDate, setSelectedDate] = useState(() => localYmd());
   const [sidebarSessionFilter, setSidebarSessionFilter] = useState<SidebarSessionFilter>("全部");
   const [draft, setDraft] = useState("");
+  const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
+  const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
+  const [photoAnalysisLoading, setPhotoAnalysisLoading] = useState(false);
+  const [messagePhotoUrls, setMessagePhotoUrls] = useState<Record<string, string>>({});
   const [isSending, setIsSending] = useState(false);
   const [streamAssistantText, setStreamAssistantText] = useState<string | null>(null);
   const [sessionCard, setSessionCard] = useState<SessionCardState>(null);
@@ -283,8 +302,28 @@ function Review() {
     sendAbortRef.current = null;
     setStreamAssistantText(null);
     setDraft("");
+    setPendingImage((prev) => {
+      revokePendingChatImage(prev);
+      return null;
+    });
+    setStreamingPhotoMarkdown(null);
+    setPhotoAnalysisLoading(false);
     setIsSending(false);
     setChatRetrying(false);
+  }, []);
+
+  const handleImageSelected = useCallback((image: PendingChatImage) => {
+    setPendingImage((prev) => {
+      revokePendingChatImage(prev);
+      return image;
+    });
+  }, []);
+
+  const handleClearImage = useCallback(() => {
+    setPendingImage((prev) => {
+      revokePendingChatImage(prev);
+      return null;
+    });
   }, []);
 
   const clearCurrentSubjectChat = useCallback(() => {
@@ -621,20 +660,28 @@ function Review() {
     !hasCachedMessages;
 
   const messages: SageChatMessage[] = useMemo(() => {
+    const slug = activeSessionSlug;
     const fromRows = messageRows
       .filter((m): m is CoachMessageRow => typeof m.id === "string")
-      .map((m) => ({
-        id: m.id,
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+      .map((m) => {
+        const imageUrl =
+          messagePhotoUrls[m.id] ??
+          (slug ? loadPhotoMessageImage(slug, m.id) : null) ??
+          undefined;
+        return {
+          id: m.id,
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          imageUrl: imageUrl ?? undefined,
+        };
+      });
     if (fromRows.length > 0) return fromRows;
     const cached = chatsBySubject.current[subject];
     if (cached?.activeSessionSlug === activeSessionSlug && cached.messages.length > 0) {
       return cached.messages;
     }
     return fromRows;
-  }, [messageRows, subject, activeSessionSlug]);
+  }, [messageRows, subject, activeSessionSlug, messagePhotoUrls]);
 
   const userMessageCount = useMemo(
     () => messageRows.filter((m) => m.role === "user").length,
@@ -1022,8 +1069,16 @@ function Review() {
   ]);
 
   const send = useCallback(async () => {
+    const imageSnapshot = pendingImage;
     const text = draft.trim();
-    if (!text || !user?.id || isSending) return;
+    const userText = text || (imageSnapshot ? "请帮我分析这道题目" : "");
+    if (!userText || !user?.id || isSending) return;
+
+    if (imageSnapshot) {
+      setPhotoAnalysisLoading(true);
+      setStreamingPhotoMarkdown(null);
+      setStreamAssistantText(null);
+    }
 
     const sendGen = slugResolveGenRef.current;
     const scopeSubject = chatSubject;
@@ -1035,6 +1090,7 @@ function Review() {
 
     setIsSending(true);
     setChatRetrying(false);
+    setStreamingPhotoMarkdown(null);
     let clearedDraft = false;
 
     const scopeStale = () => slugResolveGenRef.current !== sendGen;
@@ -1049,15 +1105,42 @@ function Review() {
 
       if (scopeStale()) return;
 
-      const { error: uErr } = await supabase.from("coach_messages").insert({
-        user_id: user.id,
-        role: "user",
-        content: text,
-        review_subject: scopeSubject,
-        review_session_date: scopeDate,
-        review_session_slug: sessionSlug,
-      });
+      let photoDataUrl: string | null = null;
+      if (imageSnapshot) {
+        try {
+          photoDataUrl = await compressImageToDataUrl(imageSnapshot.file);
+        } catch (compressErr) {
+          setStreamingPhotoMarkdown(null);
+          setPhotoAnalysisLoading(false);
+          toast.error(
+            compressErr instanceof Error ? compressErr.message : "图片处理失败",
+          );
+          if (text) setDraft(text);
+          return;
+        }
+        handleClearImage();
+      }
+
+      const userMessageContent = imageSnapshot && !text ? SAGE_PHOTO_MESSAGE_MARKER : userText;
+
+      const { data: userRow, error: uErr } = await supabase
+        .from("coach_messages")
+        .insert({
+          user_id: user.id,
+          role: "user",
+          content: userMessageContent,
+          review_subject: scopeSubject,
+          review_session_date: scopeDate,
+          review_session_slug: sessionSlug,
+        })
+        .select("id")
+        .single();
       if (uErr) throw uErr;
+
+      if (photoDataUrl && userRow?.id) {
+        savePhotoMessageImage(sessionSlug, userRow.id, photoDataUrl);
+        setMessagePhotoUrls((prev) => ({ ...prev, [userRow.id]: photoDataUrl! }));
+      }
 
       setDraft("");
       clearedDraft = true;
@@ -1068,6 +1151,69 @@ function Review() {
       await qc.invalidateQueries({
         queryKey: ["review-messages", user.id, sessionSlug, scopeSubject],
       });
+
+      if (imageSnapshot && photoDataUrl) {
+        if (scopeStale()) return;
+
+        let streamRaf = 0;
+        let pendingMarkdown = "";
+        const flushStreamToUi = () => {
+          streamRaf = 0;
+          if (scopeStale()) return;
+          setStreamingPhotoMarkdown(pendingMarkdown);
+        };
+
+        let markdown: string;
+        try {
+          markdown = await analyzeQuestionPhoto(photoDataUrl, userText, {
+            signal: abortController.signal,
+            onDelta: (accumulated) => {
+              pendingMarkdown = normalizePhotoMarkdown(accumulated);
+              if (!streamRaf) {
+                streamRaf = requestAnimationFrame(flushStreamToUi);
+              }
+            },
+          });
+          if (streamRaf) cancelAnimationFrame(streamRaf);
+        } catch (photoErr) {
+          if (streamRaf) cancelAnimationFrame(streamRaf);
+          setStreamingPhotoMarkdown(null);
+          setPhotoAnalysisLoading(false);
+          if (scopeStale() || (photoErr instanceof DOMException && photoErr.name === "AbortError")) {
+            return;
+          }
+          toast.error(
+            photoErr instanceof Error ? photoErr.message : "题目识别失败",
+          );
+          if (text) setDraft(text);
+          return;
+        }
+
+        if (scopeStale()) return;
+
+        setStreamingPhotoMarkdown(markdown);
+
+        const reply = wrapPhotoMarkdown(markdown);
+        const { error: aErr } = await supabase.from("coach_messages").insert({
+          user_id: user.id,
+          role: "assistant",
+          content: reply,
+          review_subject: scopeSubject,
+          review_session_date: scopeDate,
+          review_session_slug: sessionSlug,
+        });
+        if (aErr) throw aErr;
+
+        if (scopeStale()) return;
+
+        await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
+        await qc.invalidateQueries({
+          queryKey: ["review-messages", user.id, sessionSlug, scopeSubject],
+        });
+        setStreamingPhotoMarkdown(null);
+        setPhotoAnalysisLoading(false);
+        return;
+      }
 
       const { data: historyAfterUser, error: h0Err } = await supabase
         .from("coach_messages")
@@ -1147,7 +1293,7 @@ function Review() {
               ? streamErr.message
               : "发送失败",
         );
-        setDraft(text);
+        if (text) setDraft(text);
         return;
       } finally {
         setChatRetrying(false);
@@ -1195,12 +1341,15 @@ function Review() {
       toast.error(msg);
     } finally {
       setStreamAssistantText(null);
+      setStreamingPhotoMarkdown(null);
+      setPhotoAnalysisLoading(false);
       setChatRetrying(false);
       setIsSending(false);
       slugNavSourceRef.current = "control";
     }
   }, [
     draft,
+    pendingImage,
     user?.id,
     isSending,
     chatSubject,
@@ -1212,6 +1361,7 @@ function Review() {
     bumpSessionScope,
     runSilentSummary,
     subjectsWithEndedReview,
+    handleClearImage,
   ]);
 
   const prefetchSummary = useCallback(() => {
@@ -1415,6 +1565,11 @@ function Review() {
       streamingAssistantText={streamAssistantText}
       composerHint={chatRetrying ? "重试中…" : null}
       onWrapUpDetected={prefetchSummary}
+      pendingImage={pendingImage}
+      onImageSelected={handleImageSelected}
+      onClearImage={handleClearImage}
+      photoAnalysisLoading={photoAnalysisLoading}
+      streamingPhotoMarkdown={streamingPhotoMarkdown}
       betweenScrollAndInput={
         showEndReviewButton ? (
           <Button

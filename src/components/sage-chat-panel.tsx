@@ -5,6 +5,14 @@ import ReactMarkdown from "react-markdown";
 import { isReviewWrapUpMessage } from "@/lib/review-opening";
 import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
+import {
+  ChatImageAttachButton,
+  ChatImagePreview,
+  type PendingChatImage,
+} from "@/components/chat-image-picker";
+import { PhotoAnalysisMarkdown } from "@/components/photo-analysis-markdown";
+import { unwrapPhotoMarkdown } from "@/lib/question-photo-analysis";
+import { isPhotoOnlyMessageContent } from "@/lib/review-photo-messages";
 
 /** Block javascript:/data: and other non-http(s) schemes in assistant Markdown. */
 function markdownUrlTransform(url: string): string {
@@ -37,6 +45,8 @@ export type SageChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Base64 or blob URL for user-uploaded question photos. */
+  imageUrl?: string;
   /** Set by parent for one frame after send; panel also detects sends internally. */
   isNew?: boolean;
 };
@@ -68,6 +78,14 @@ type SageChatPanelProps = {
   composerHint?: string | null;
   /** Last assistant message signals session wrap-up; parent can prefetch summary. */
   onWrapUpDetected?: () => void;
+  /** Optional photo-of-question flow (Review page). */
+  pendingImage?: PendingChatImage | null;
+  onImageSelected?: (image: PendingChatImage) => void;
+  onClearImage?: () => void;
+  /** Assistant bubble shows photo-analysis skeleton while waiting for VL model. */
+  photoAnalysisLoading?: boolean;
+  /** Streaming markdown while VL model responds. */
+  streamingPhotoMarkdown?: string | null;
 };
 
 function SendArrowIcon() {
@@ -110,6 +128,51 @@ function AssistantBubbleContent({
   );
 }
 
+function AssistantPhotoCardShell({
+  children,
+  isMobile,
+}: {
+  children: ReactNode;
+  isMobile: boolean;
+}) {
+  if (isMobile) {
+    return (
+      <div className="flex max-w-[94%] flex-col items-start gap-1">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
+          Sage
+        </div>
+        <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-white px-4 py-4 shadow-sm">
+          {children}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-[min(100%,32rem)] min-w-0 rounded-2xl border border-border/80 bg-white px-4 py-4 shadow-sm">
+      {children}
+    </div>
+  );
+}
+
+function UserBubbleContent({ msg }: { msg: SageChatMessage }) {
+  const showText =
+    msg.content.trim().length > 0 && !isPhotoOnlyMessageContent(msg.content);
+
+  return (
+    <div className="flex flex-col gap-2">
+      {msg.imageUrl ? (
+        <img
+          src={msg.imageUrl}
+          alt="题目图片"
+          className="max-h-40 max-w-full rounded-lg object-contain"
+        />
+      ) : null}
+      {showText ? <p className="whitespace-pre-wrap">{msg.content}</p> : null}
+    </div>
+  );
+}
+
 export function SageChatPanel({
   messages,
   draft,
@@ -129,6 +192,11 @@ export function SageChatPanel({
   streamingAssistantText = null,
   composerHint = null,
   onWrapUpDetected,
+  pendingImage = null,
+  onImageSelected,
+  onClearImage,
+  photoAnalysisLoading = false,
+  streamingPhotoMarkdown = null,
 }: SageChatPanelProps) {
   const isMobile = layout === "mobile";
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -141,7 +209,11 @@ export function SageChatPanel({
   const displayMessages = useMemo(() => {
     if (!pendingUserMessage) return messages;
     const confirmed = messages.some(
-      (m) => m.role === "user" && m.content === pendingUserMessage.content,
+      (m) =>
+        m.role === "user" &&
+        (m.content === pendingUserMessage.content ||
+          (!!pendingUserMessage.imageUrl &&
+            (!!m.imageUrl || isPhotoOnlyMessageContent(m.content)))),
     );
     if (confirmed) return messages;
     return [...messages, pendingUserMessage];
@@ -156,7 +228,11 @@ export function SageChatPanel({
   useEffect(() => {
     if (!pendingUserMessage) return;
     const confirmed = messages.some(
-      (m) => m.role === "user" && m.content === pendingUserMessage.content,
+      (m) =>
+        m.role === "user" &&
+        (m.content === pendingUserMessage.content ||
+          (!!pendingUserMessage.imageUrl &&
+            (!!m.imageUrl || isPhotoOnlyMessageContent(m.content)))),
     );
     if (confirmed) {
       setPendingUserMessage(null);
@@ -206,7 +282,7 @@ export function SageChatPanel({
     requestAnimationFrame(() => {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     });
-  }, [displayMessages, isSending, streamingAssistantText, flyingUserMessageId]);
+  }, [displayMessages, isSending, streamingAssistantText, streamingPhotoMarkdown, flyingUserMessageId]);
 
   useEffect(() => {
     if (!onWrapUpDetected || isSending || streamingAssistantText != null) return;
@@ -217,22 +293,35 @@ export function SageChatPanel({
     onWrapUpDetected();
   }, [displayMessages, isSending, streamingAssistantText, onWrapUpDetected]);
 
+  const canSubmit = Boolean(draft.trim() || pendingImage) && !isSending;
+  const imagePickerEnabled = Boolean(onImageSelected && onClearImage);
+
   const handleSubmit = useCallback(() => {
     const text = draft.trim();
-    if (!text || isSending) return;
+    const displayText = text || (pendingImage ? "请帮我分析这道题目" : "");
+    if (!displayText || isSending) return;
 
     const optimisticId = `__optimistic_${Date.now()}`;
     setPendingUserMessage({
       id: optimisticId,
       role: "user",
       content: text,
+      imageUrl: pendingImage?.previewUrl,
       isNew: true,
     });
     setFlyingUserMessageId(optimisticId);
     window.setTimeout(() => setFlyingUserMessageId(null), 150);
     onDraftChange("");
     onSubmit();
-  }, [draft, isSending, onDraftChange, onSubmit]);
+  }, [draft, isSending, onDraftChange, onSubmit, pendingImage]);
+
+  const renderAssistantPhotoBubble = (markdown: string, loading: boolean, key?: string) => (
+    <div key={key} className="flex justify-start">
+      <AssistantPhotoCardShell isMobile={isMobile}>
+        <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
+      </AssistantPhotoCardShell>
+    </div>
+  );
 
   const renderAssistantBubble = (content: string, streaming = false, key?: string) => (
     <div key={key} className="flex justify-start">
@@ -253,6 +342,14 @@ export function SageChatPanel({
       )}
     </div>
   );
+
+  const renderAssistantMessage = (msg: SageChatMessage) => {
+    const { isPhotoAnalysis, markdown } = unwrapPhotoMarkdown(msg.content);
+    if (isPhotoAnalysis) {
+      return renderAssistantPhotoBubble(markdown, false, msg.id);
+    }
+    return renderAssistantBubble(msg.content, false, msg.id);
+  };
 
   return (
     <div
@@ -329,16 +426,26 @@ export function SageChatPanel({
                     isFlyingUser && "message-new",
                   )}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <UserBubbleContent msg={msg} />
                 </div>
               ) : (
-                renderAssistantBubble(msg.content)
+                renderAssistantMessage(msg)
               )}
             </div>
           );
         })}
-        {(streamingAssistantText != null || isSending) &&
-          renderAssistantBubble(streamingAssistantText ?? "", true, "__streaming__")}
+        {photoAnalysisLoading || streamingPhotoMarkdown != null
+          ? renderAssistantPhotoBubble(
+              streamingPhotoMarkdown ?? "",
+              photoAnalysisLoading,
+              "__photo_streaming__",
+            )
+          : null}
+        {!photoAnalysisLoading &&
+        streamingPhotoMarkdown == null &&
+        (streamingAssistantText != null || isSending)
+          ? renderAssistantBubble(streamingAssistantText ?? "", true, "__streaming__")
+          : null}
       </div>
 
       <div className={cn("shrink-0", !isMobile && expand && "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm")}>
@@ -354,14 +461,30 @@ export function SageChatPanel({
           </p>
         ) : null}
 
+        {pendingImage && onClearImage ? (
+          <ChatImagePreview
+            image={pendingImage}
+            onClear={onClearImage}
+            disabled={isSending}
+            className={isMobile ? undefined : "px-0"}
+          />
+        ) : null}
+
         {isMobile ? (
           <form
-            className="flex h-[52px] shrink-0 items-center px-4 py-[10px]"
+            className="flex h-[52px] shrink-0 items-center gap-1 px-4 py-[10px]"
             onSubmit={(e) => {
               e.preventDefault();
               handleSubmit();
             }}
           >
+            {imagePickerEnabled ? (
+              <ChatImageAttachButton
+                onImageSelected={onImageSelected!}
+                disabled={isSending}
+                className="h-9 w-9 shrink-0"
+              />
+            ) : null}
             <div className="relative flex min-w-0 flex-1 items-center">
               <Textarea
                 value={draft}
@@ -374,11 +497,14 @@ export function SageChatPanel({
                 }}
                 placeholder={placeholder}
                 rows={1}
-                className="min-h-0 h-9 w-full resize-none rounded-[24px] border border-border bg-white py-2 pl-4 pr-12 text-base leading-5"
+                className={cn(
+                  "min-h-0 h-9 w-full resize-none rounded-[24px] border border-border bg-white py-2 pr-12 text-base leading-5",
+                  imagePickerEnabled ? "pl-3" : "pl-4",
+                )}
               />
               <Button
                 type="submit"
-                disabled={!draft.trim() || isSending}
+                disabled={!canSubmit}
                 size="icon"
                 className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full bg-[#1a1a2e] text-white hover:bg-[#1a1a2e]/90"
               >
@@ -394,6 +520,13 @@ export function SageChatPanel({
               handleSubmit();
             }}
           >
+            {imagePickerEnabled ? (
+              <ChatImageAttachButton
+                onImageSelected={onImageSelected!}
+                disabled={isSending}
+                className="h-12 w-12 shrink-0"
+              />
+            ) : null}
             <Textarea
               value={draft}
               onChange={(e) => onDraftChange(e.target.value)}
@@ -408,7 +541,7 @@ export function SageChatPanel({
             />
             <Button
               type="submit"
-              disabled={!draft.trim() || isSending}
+              disabled={!canSubmit}
               size="icon"
               className="h-12 w-12 shrink-0 rounded-xl"
             >
