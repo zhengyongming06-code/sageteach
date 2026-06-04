@@ -11,23 +11,21 @@ import { cn } from "@/lib/utils";
 type PhotoQuizCardProps = {
   quiz: PhotoQuizItem;
   index: number;
-  answersRevealed: boolean;
 };
 
-export function PhotoQuizCard({ quiz, index, answersRevealed }: PhotoQuizCardProps) {
+export function PhotoQuizCard({ quiz, index }: PhotoQuizCardProps) {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const hasStoredAnswer = Boolean(quiz.answer?.trim());
-  const canGrade = answersRevealed && hasStoredAnswer;
-  const answered = canGrade && selectedOption != null;
+  const answered = hasStoredAnswer && selectedOption != null;
 
   const correctLetter = hasStoredAnswer ? normalizeQuizAnswerLetter(quiz.answer!) : "";
 
   const pickOption = useCallback(
     (opt: string) => {
-      if (canGrade && selectedOption != null) return;
+      if (selectedOption != null) return;
       setSelectedOption(opt);
     },
-    [canGrade, selectedOption],
+    [selectedOption],
   );
 
   const feedbackCorrect =
@@ -49,7 +47,7 @@ export function PhotoQuizCard({ quiz, index, answersRevealed }: PhotoQuizCardPro
         {quiz.options.map((opt) => {
           const letter = optionLetter(opt);
           const isSelected = selectedOption === opt;
-          const isCorrectOpt = canGrade && letter === correctLetter;
+          const isCorrectOpt = answered && letter === correctLetter;
 
           let variant =
             "border-border bg-white text-foreground hover:border-primary/35 hover:bg-slate-50 active:scale-[0.99]";
@@ -70,7 +68,7 @@ export function PhotoQuizCard({ quiz, index, answersRevealed }: PhotoQuizCardPro
             <button
               key={opt}
               type="button"
-              disabled={canGrade && selectedOption != null}
+              disabled={selectedOption != null}
               onClick={() => pickOption(opt)}
               className={cn(
                 "flex w-full items-start justify-between gap-2 rounded-xl border px-4 py-3 text-left text-sm shadow-sm transition",
@@ -93,12 +91,6 @@ export function PhotoQuizCard({ quiz, index, answersRevealed }: PhotoQuizCardPro
         })}
       </div>
 
-      {!answersRevealed && hasStoredAnswer ? (
-        <p className="mt-3 text-xs text-muted-foreground">
-          做完后发送「对答案」或「做完了」，查看正确答案与解析。
-        </p>
-      ) : null}
-
       {answered && quiz.explanation ? (
         <div
           className={cn(
@@ -117,19 +109,6 @@ export function PhotoQuizCard({ quiz, index, answersRevealed }: PhotoQuizCardPro
             text={quiz.explanation}
             className="text-[14px] leading-[1.8] text-muted-foreground"
           />
-        </div>
-      ) : null}
-
-      {answersRevealed && hasStoredAnswer && !selectedOption ? (
-        <div className="mt-4 rounded-xl border border-border/80 bg-muted/30 px-3 py-3 text-sm">
-          <p className="mb-1 font-medium text-foreground">正确答案 {correctLetter}</p>
-          {quiz.explanation ? (
-            <MathHtml
-              as="p"
-              text={quiz.explanation}
-              className="text-[14px] leading-[1.8] text-muted-foreground"
-            />
-          ) : null}
         </div>
       ) : null}
     </article>

@@ -260,7 +260,7 @@ export function DailyQuestionCard({ userId, questionDate, enabled }: DailyQuesti
             <Input
               value={answerDraft}
               onChange={(e) => setAnswerDraft(e.target.value)}
-              placeholder="写下你的答案"
+              placeholder="写下你的答案（选择题可填 A/B/C/D）"
               className="rounded-xl sm:flex-1"
               disabled={submitting}
               onKeyDown={(e) => {

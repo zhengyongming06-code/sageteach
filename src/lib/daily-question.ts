@@ -33,6 +33,12 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
+import {
+  gradeAnswerLocally,
+  SAGE_GRADING_CONSERVATIVE_SUFFIX,
+  SAGE_MCQ_GENERATION_SAFETY_SUFFIX,
+  validateGeneratedMcq,
+} from "@/lib/ai-safety";
 
 export type DailyQuestionRow = {
   id: string;
@@ -95,20 +101,23 @@ export type GeneratedDailyQuestion = {
   subject: string;
   answer: string;
   explanation: string;
+  options?: string[];
 };
 
 export async function generateDailyQuestionViaAi(weakPoints: string[]): Promise<GeneratedDailyQuestion> {
   const list = weakPoints.map((w, i) => `${i + 1}. ${w}`).join("\n");
-  const sys = `You output only valid JSON objects, no markdown.`;
+  const sys = `You output only valid JSON objects, no markdown.${SAGE_MCQ_GENERATION_SAFETY_SUFFIX}`;
   const user = `Based on these weak points from the student's history:
 ${list}
 
-Generate ONE short practice question to test if they've improved. Format:
+Generate ONE short multiple-choice question testing concept/method understanding — NOT numeric calculation.
+Format:
 {
-  "question": "题目内容，简短，30秒内能作答",
+  "question": "题干（不含答案）",
   "subject": "学科",
-  "answer": "正确答案",
-  "explanation": "一句话解释，不超过50字"
+  "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
+  "answer": "A",
+  "explanation": "一句话解析，不超过50字"
 }
 Return ONLY valid JSON.`;
   const raw = await invokeDeepSeekChat(
@@ -123,7 +132,27 @@ Return ONLY valid JSON.`;
   const subject = String(o.subject ?? "").trim();
   const answer = String(o.answer ?? "").trim();
   const explanation = String(o.explanation ?? "").trim();
+  const optionsRaw = o.options;
+  const options = Array.isArray(optionsRaw)
+    ? optionsRaw.slice(0, 4).map((x) => String(x).trim()).filter(Boolean)
+    : undefined;
+
   if (!question || !subject || !answer) throw new Error("incomplete_question");
+
+  if (options && options.length >= 4) {
+    if (!validateGeneratedMcq({ question, options, answer, explanation })) {
+      throw new Error("invalid_mcq");
+    }
+    const optionsBlock = options.join("\n");
+    return {
+      question: `${question}\n\n${optionsBlock}`,
+      subject,
+      answer,
+      explanation: explanation || "再对照一下要点。",
+      options,
+    };
+  }
+
   return { question, subject, answer, explanation: explanation || "再对照一下要点。" };
 }
 
@@ -131,13 +160,21 @@ export async function gradeDailyAnswerViaAi(params: {
   question: string;
   correctAnswer: string;
   studentAnswer: string;
+  options?: string[];
 }): Promise<boolean> {
+  const local = gradeAnswerLocally({
+    studentAnswer: params.studentAnswer,
+    correctAnswer: params.correctAnswer,
+    options: params.options,
+  });
+  if (local.definite) return local.correct;
+
   const user = `Question: ${params.question}
 Correct answer (authoritative): ${params.correctAnswer}
 Student answer: ${params.studentAnswer}
 
-Decide if the student's answer is correct enough for a short recall question (meaning equivalent counts).
-Return ONLY JSON: {"correct":true} or {"correct":false}`;
+Decide if the student's answer is clearly correct for this short recall question.
+Return ONLY JSON: {"correct":true} or {"correct":false}${SAGE_GRADING_CONSERVATIVE_SUFFIX}`;
   const raw = await invokeDeepSeekChat(
     [
       { role: "system", content: "Return only valid JSON." },
@@ -148,7 +185,7 @@ Return ONLY JSON: {"correct":true} or {"correct":false}`;
   const o = parseJsonObject(raw);
   if (typeof o.correct === "boolean") return o.correct;
   if (typeof o.was_correct === "boolean") return o.was_correct;
-  throw new Error("grade_parse");
+  return false;
 }
 
 /** Returns null if no row, or throws on unexpected errors. Missing table → throws with isDailyQuestionsUnavailableError. */

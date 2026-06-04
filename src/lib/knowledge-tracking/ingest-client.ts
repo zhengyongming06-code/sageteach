@@ -6,6 +6,7 @@ import {
   parsePhotoExtractionJson,
   PHOTO_KNOWLEDGE_EXTRACTION_SYSTEM,
 } from "@/lib/knowledge-tracking/extract-prompt";
+import { stripHiddenQuizKeysFromMarkdown } from "@/lib/question-photo-analysis";
 import { buildWeaknessTree, countWeakNodes, mapToCatalogNames } from "@/lib/knowledge-tracking/graph";
 import { MASTERY_EVENT_DELTA } from "@/lib/knowledge-tracking/mastery";
 import type {
@@ -38,13 +39,14 @@ async function extractKnowledgeFromMarkdown(
   subject: string,
   markdown: string,
 ): Promise<PhotoKnowledgeExtraction | null> {
+  const sanitized = stripHiddenQuizKeysFromMarkdown(markdown);
   try {
     const raw = await invokeDeepSeekChat(
       [
         { role: "system", content: PHOTO_KNOWLEDGE_EXTRACTION_SYSTEM },
         {
           role: "user",
-          content: buildPhotoKnowledgeExtractionUserPrompt(subject, markdown),
+          content: buildPhotoKnowledgeExtractionUserPrompt(subject, sanitized),
         },
       ],
       { max_tokens: 800 },
@@ -282,9 +284,9 @@ export async function ingestPhotoEvidenceClient(
       question_summary: "拍照搜题",
       question_type: "未分类",
       difficulty: 3 as const,
-      is_wrong: true,
+      is_wrong: false,
       knowledge_points: [],
-      confidence: 0.3,
+      confidence: 0.2,
     };
 
   const sessionId = await ensureLearningSession({

@@ -16,9 +16,11 @@ Schema:
 
 规则：
 - knowledge_points 必须具体，优先使用标准高考知识点名称
-- 若文本含【答案】且学生显然在求助，is_wrong 默认 true
+- is_wrong 仅在文本明确表示「我做错了/这题错了/求讲解错题」等时为 true；普通搜题、对答案、未说明对错时默认 false
+- 禁止根据【答案】行或解析存在就推断学生做错
 - 至少 1 个、最多 5 个 knowledge_points
-- confidence 反映你对知识点标注的把握`;
+- confidence 反映你对知识点标注的把握；不确定时降低 confidence
+- 文本不足以判断时，question_type 可写「未分类」，is_wrong 用 false`;
 
 export function buildPhotoKnowledgeExtractionUserPrompt(
   subject: string,

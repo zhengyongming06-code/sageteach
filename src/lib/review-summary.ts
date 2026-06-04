@@ -1,4 +1,6 @@
 import { invokeDeepSeekChat } from "./deepseek-supabase";
+import { SAGE_EXTRACTION_SAFETY_SUFFIX } from "./ai-safety";
+import { stripPhotoContentForChatApi } from "./question-photo-analysis";
 
 export type ReviewSummaryPayload = {
   subject: string;
@@ -13,14 +15,23 @@ export function formatReviewConversationForSummary(
 ): string {
   return rows
     .filter((r) => r.role === "user" || r.role === "assistant")
-    .map((r) => `${r.role === "user" ? "学生" : "Sage"}：${r.content}`)
+    .map((r) => {
+      const content =
+        r.role === "assistant" ? stripPhotoContentForChatApi(r.content) : r.content;
+      return `${r.role === "user" ? "学生" : "Sage"}：${content}`;
+    })
     .join("\n");
 }
 
-const SUMMARY_SYSTEM = `You extract structured data from a Chinese tutoring chat. Output ONLY valid JSON, no markdown fences, no other text.`;
+const SUMMARY_SYSTEM = `You extract structured data from a Chinese tutoring chat. Output ONLY valid JSON, no markdown fences, no other text.${SAGE_EXTRACTION_SAFETY_SUFFIX}`;
 
 export function buildReviewSummaryUserPrompt(conversation: string): string {
-  return `Based on this conversation, generate a JSON summary:
+  return `Based on this conversation, generate a JSON summary.
+Rules:
+- weak_point / tonight_task / mastered must be grounded in what the student explicitly said or did in the chat; if unclear, use null for mastered and a cautious weak_point like "待进一步确认".
+- Do NOT invent quiz results or assume which option the student picked.
+- Do NOT claim the student mastered something unless they demonstrated it in the conversation.
+
 {
   "subject": "学科",
   "weak_point": "这次发现的核心知识点漏洞，一句话，要具体到知识点名称",

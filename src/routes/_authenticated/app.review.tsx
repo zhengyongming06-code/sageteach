@@ -8,6 +8,7 @@ import { buildReviewDeepSeekSystemPrompt } from "@/lib/sage-system-prompt";
 import { filterCoachMessagesForSession } from "@/lib/review-session-messages";
 import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
 import { invokeDeepSeekChat, isRetryableNetworkFailure } from "@/lib/deepseek-supabase";
+import { recordProductAnalyticsEvent } from "@/lib/analytics/api";
 import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
@@ -19,15 +20,11 @@ import {
   analyzeQuestionPhoto,
   normalizePhotoMarkdown,
   SAGE_PHOTO_MD_MARKER,
+  sanitizePhotoMarkdownForDisplay,
   stripPhotoContentForChatApi,
-  unwrapPhotoMarkdown,
   wrapPhotoMarkdown,
 } from "@/lib/question-photo-analysis";
-import {
-  formatQuizKeysForCoachHint,
-  isPhotoQuizRevealRequest,
-  PHOTO_QUIZ_REVEAL_EVENT,
-} from "@/lib/photo-quiz-parse";
+import { isPhotoQuizRevealRequest } from "@/lib/photo-quiz-parse";
 import { ingestPhotoEvidence } from "@/lib/knowledge-tracking/ingest-client";
 import {
   isPhotoOnlyMessageContent,
@@ -1144,9 +1141,10 @@ function Review() {
     const userText = text || (imageSnapshot ? "请帮我分析这道题目" : "");
     if (!userText || !user?.id || isSending) return;
 
-    const wantsQuizReveal = !imageSnapshot && isPhotoQuizRevealRequest(userText);
-    if (wantsQuizReveal) {
-      window.dispatchEvent(new CustomEvent(PHOTO_QUIZ_REVEAL_EVENT));
+    if (!imageSnapshot && isPhotoQuizRevealRequest(userText)) {
+      setDraft("");
+      toast.message("请直接在巩固题上点击选项，系统会自动判分并显示解析。");
+      return;
     }
 
     if (imageSnapshot) {
@@ -1249,6 +1247,9 @@ function Review() {
           if (scopeStale() || (photoErr instanceof DOMException && photoErr.name === "AbortError")) {
             return;
           }
+          void recordProductAnalyticsEvent("photo_analysis_failed", {
+            subject: scopeSubject,
+          });
           toast.error(
             photoErr instanceof Error ? photoErr.message : "题目识别失败",
           );
@@ -1258,7 +1259,7 @@ function Review() {
 
         if (scopeStale()) return;
 
-        setStreamingPhotoMarkdown(markdown);
+        setStreamingPhotoMarkdown(sanitizePhotoMarkdownForDisplay(markdown));
 
         const reply = wrapPhotoMarkdown(markdown);
         const { data: assistantRow, error: aErr } = await supabase
@@ -1318,28 +1319,12 @@ function Review() {
         scopeSubject,
       );
 
-      let sysExtra = "";
-      if (wantsQuizReveal) {
-        const photoRow = [...historyForApi]
-          .reverse()
-          .find((m) => m.role === "assistant" && m.content.startsWith(SAGE_PHOTO_MD_MARKER));
-        if (photoRow) {
-          const hint = formatQuizKeysForCoachHint(
-            unwrapPhotoMarkdown(photoRow.content).markdown,
-          );
-          if (hint) {
-            sysExtra = `\n\n【拍照巩固题·对答案】学生要对巩固题答案。参考答案：\n${hint}\n请逐题确认对错并简要讲解解析，不要出新题。`;
-          }
-        }
-      }
-
-      const sys =
-        buildReviewDeepSeekSystemPrompt({
-          subject: scopeSubject,
-          sessionDate: scopeDate,
-          onboardingIncomplete,
-          sprintMode,
-        }) + sysExtra;
+      const sys = buildReviewDeepSeekSystemPrompt({
+        subject: scopeSubject,
+        sessionDate: scopeDate,
+        onboardingIncomplete,
+        sprintMode,
+      });
       const apiMessages = [
         { role: "system" as const, content: sys },
         ...historyForApi.map((m) => ({

@@ -29,7 +29,8 @@ type TrackBody = {
 };
 
 const EXTRACTION_SYSTEM = `你是 Sage 知识追踪引擎。根据拍照搜题的解析文本，提取结构化 JSON。
-只返回 JSON。Schema: {"subject":"...","question_summary":"...","question_type":"...","difficulty":1-5,"is_wrong":true/false,"knowledge_points":["..."],"confidence":0-1}`;
+只返回 JSON。Schema: {"subject":"...","question_summary":"...","question_type":"...","difficulty":1-5,"is_wrong":true/false,"knowledge_points":["..."],"confidence":0-1}
+规则：is_wrong 仅在文本明确表示做错时为 true；普通搜题默认 false。禁止根据【答案】行推断做错。不确定时降低 confidence。`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -82,8 +83,12 @@ Deno.serve(async (req) => {
     return json({ error: { message: "DEEPSEEK_API_KEY missing" } }, 500);
   }
 
-  // 1. DeepSeek 提取知识点
-  const extraction = await extractKnowledge(apiKey, subject, analysis_markdown);
+  // 1. DeepSeek 提取知识点（不向模型暴露巩固题答案块）
+  const sanitizedMarkdown = analysis_markdown.replace(
+    /---\s*QUIZ\s*KEY\s*---[\s\S]*?---\s*END\s*QUIZ\s*KEY\s*---/gi,
+    "",
+  );
+  const extraction = await extractKnowledge(apiKey, subject, sanitizedMarkdown);
   if (!extraction) {
     return json({ error: { message: "Knowledge extraction failed" } }, 502);
   }

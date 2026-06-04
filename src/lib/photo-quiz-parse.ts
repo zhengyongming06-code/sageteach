@@ -1,4 +1,5 @@
 import { stripHiddenQuizKeysFromMarkdown } from "@/lib/question-photo-analysis";
+import { validateGeneratedMcq } from "@/lib/ai-safety";
 
 export type PhotoQuizItem = {
   topicHint?: string;
@@ -14,9 +15,7 @@ export type PhotoAnalysisSegment =
 
 const QUIZ_BLOCK_RE = /---\s*QUIZ\s*---([\s\S]*?)---\s*END\s*QUIZ\s*---/gi;
 
-export const PHOTO_QUIZ_REVEAL_EVENT = "sage-reveal-quiz-answers";
-
-/** Student asks to check consolidation quiz answers after photo analysis. */
+/** Legacy chat phrase — no longer triggers AI; kept for optional UX guard in review send. */
 export function isPhotoQuizRevealRequest(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
@@ -132,37 +131,34 @@ export function parseQuizBlock(
 
   if (!question.trim() || options.length < 2) return null;
 
-  return {
+  const item: PhotoQuizItem = {
     topicHint,
     question: question.trim(),
     options: options.slice(0, 4),
     answer: answer.trim() || undefined,
     explanation: explanation.trim() || undefined,
   };
+
+  if (
+    item.answer &&
+    item.explanation &&
+    !validateGeneratedMcq({
+      question: item.question,
+      options: item.options,
+      answer: item.answer,
+      explanation: item.explanation,
+    })
+  ) {
+    return { ...item, answer: undefined, explanation: undefined };
+  }
+
+  return item;
 }
 
 function extractQuizKeyAfter(markdown: string, quizEndIndex: number): string | undefined {
   const tail = markdown.slice(quizEndIndex);
   const m = tail.match(/^\s*---\s*QUIZ\s*KEY\s*---([\s\S]*?)---\s*END\s*QUIZ\s*KEY\s*---/i);
   return m?.[1];
-}
-
-/** Build coach hint when student asks to reveal photo quiz answers. */
-export function formatQuizKeysForCoachHint(markdown: string): string | null {
-  const segments = splitPhotoAnalysisContent(markdown);
-  const quizzes = segments
-    .filter((s): s is { type: "quiz"; quiz: PhotoQuizItem } => s.type === "quiz")
-    .map((s) => s.quiz)
-    .filter((q) => q.answer);
-  if (quizzes.length === 0) return null;
-
-  return quizzes
-    .map((q, i) => {
-      const letter = normalizeQuizAnswerLetter(q.answer!);
-      const exp = q.explanation?.trim();
-      return `第${i + 1}题：答案 ${letter}${exp ? `；解析：${exp}` : ""}`;
-    })
-    .join("\n");
 }
 
 /** Split analysis markdown into markdown segments and interactive quiz blocks. */

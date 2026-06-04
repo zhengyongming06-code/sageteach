@@ -1,4 +1,8 @@
 import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
+import {
+  SAGE_MCQ_GENERATION_SAFETY_SUFFIX,
+  validateGeneratedMcq,
+} from "@/lib/ai-safety";
 import type { Subject } from "@/lib/subjects";
 
 export type DiagnosticDifficulty = "easy" | "medium" | "hard";
@@ -12,11 +16,11 @@ export type DiagnosticQuestion = {
 };
 
 const DIFFICULTY_PROMPT: Record<DiagnosticDifficulty, string> = {
-  easy: `难度要求：高考基础题，送分题难度，直接代入公式可得答案，不需要复杂推导。
-出基础题，难度为高考简单题。`,
-  medium: `难度要求：高考中等题，需要2-3步推导，类似高考第10-14题难度。
-出中等难度题，难度为高考中等题。`,
-  hard: `难度要求：综合题，需要结合2-3个知识点，有一定推导步骤，类似平时模拟卷中等偏难题，不要出超纲或创新题型。`,
+  easy: `难度要求：基础「概念 / 定义 / 公式适用条件」判断题，不要出需要精确数值计算的题。
+例如：「以下哪项是椭圆的标准方程形式？」`,
+  medium: `难度要求：中等「方法 / 步骤 / 定理适用条件」判断题，不要出需要多步数值计算的题。
+例如：「求圆锥曲线弦长时，通常需要先求什么？」`,
+  hard: `难度要求：综合「思路 / 方法选择」判断题，可结合 2–3 个知识点，但不要求算出具体数值答案。`,
 };
 
 export const DIAGNOSTIC_DIFFICULTY_OPTIONS: {
@@ -36,7 +40,7 @@ const REQUEST_TIMEOUT_MS_DEFAULT = 10_000;
 const REQUEST_TIMEOUT_MS_HARD = 15_000;
 
 const SIMPLER_RETRY_HINT =
-  "请出一道更简单的单选题，一两步可得答案，确保能输出合法 JSON。";
+  "请出一道更简单的概念/方法判断单选题，不要数值计算，确保能输出合法 JSON。";
 
 const LATEX_FORMAT_HINT =
   "数学公式请用LaTeX格式，行内公式用$...$包裹，例如：$y^2=2px$，$\\pm\\sqrt{2}$，$\\frac{1}{4}$。";
@@ -46,28 +50,16 @@ function requestTimeoutMs(difficulty: DiagnosticDifficulty): number {
 }
 
 function diagnosticSystemPrompt(difficulty: DiagnosticDifficulty): string {
-  if (difficulty === "hard") {
-    return `你是高考出题专家。出一道综合单选题，题目可以有一定难度。
-只返回一个扁平 JSON 对象，不要嵌套对象，options 只能是 4 个字符串，不要数组套数组。
+  const base = `你是严谨的高考出题专家。出一道「概念 / 方法 / 步骤判断」单选题，禁止需要精确数值计算才能作答的题。
+只返回一个扁平 JSON 对象，不要嵌套，options 只能是 4 个字符串。
 格式：
 {"knowledge_point":"知识点","question":"题目","options":["A. 选项","B. 选项","C. 选项","D. 选项"],"answer":"A","explanation":"解析"}
-答案必须正确。字符串内不要有换行或未转义引号。`;
-  }
+answer 只写字母；题目与选项中禁止出现答案或解题过程。若无法保证答案正确，answer 留空字符串。
+字符串内不要有换行或未转义引号。${SAGE_MCQ_GENERATION_SAFETY_SUFFIX}`;
 
-  return `你是严谨的高考出题专家。出一道高考单选题。
-要求：
-1. 答案必须唯一且正确，出题前在脑中验算
-2. 题目难度必须严格符合用户指定的难度要求
-3. 只返回JSON，不含任何其他文字
-4. JSON格式严格如下，不要有换行符在字符串内：
-{
-  "knowledge_point": "知识点",
-  "question": "题目",
-  "options": ["A. 选项", "B. 选项", "C. 选项", "D. 选项"],
-  "answer": "A",
-  "explanation": "解析"
-}
-5. 字符串内不要有未转义的引号或换行`;
+  if (difficulty === "hard") return base;
+  return `${base}
+要求：答案必须唯一且正确；出题前自检选项是否互斥；只返回 JSON，不含其它文字。`;
 }
 
 /** Strip think blocks / fences / control chars, then isolate the JSON object. */
@@ -156,8 +148,17 @@ function parseQuestionFallback(raw: string, knowledgePoint: string): DiagnosticQ
 
   const options =
     extractOptionsFromRaw(raw) ??
-    ["A. 见题目条件", "B. 见题目条件", "C. 见题目条件", "D. 见题目条件"];
-  const answer = normalizeAnswerLetter(extractQuotedJsonField(raw, "answer")) ?? "A";
+    (() => {
+      console.warn("[diagnostic] fallback missing options — rejecting question");
+      return null;
+    })();
+  if (!options) return null;
+
+  const answer = normalizeAnswerLetter(extractQuotedJsonField(raw, "answer"));
+  if (!answer) {
+    console.warn("[diagnostic] fallback missing valid answer letter — rejecting question");
+    return null;
+  }
   const explanation =
     extractQuotedJsonField(raw, "explanation") ?? "请参考教材或老师讲法核对本题。";
 
@@ -255,6 +256,11 @@ knowledge_point 必须与「${knowledgePoint}」完全一致。`;
       simpler ? "(retry)" : "",
       text.slice(0, 800),
     );
+    return null;
+  }
+
+  if (!validateGeneratedMcq(q)) {
+    console.warn("[diagnostic] validation failed for", knowledgePoint, q.question.slice(0, 120));
     return null;
   }
 

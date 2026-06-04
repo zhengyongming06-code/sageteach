@@ -17,6 +17,7 @@ import {
   markDailyTrainingDone,
   SAGE_KNOWLEDGE_REFRESH_EVENT,
 } from "@/lib/knowledge-tracking/ingest-client";
+import { recordProductAnalyticsEvent } from "@/lib/analytics/api";
 import type { DailyTrainingItem } from "@/lib/knowledge-tracking/types";
 import { KNOWLEDGE_POINT_STATUS_DOT_CLASS, type KnowledgePointStatus } from "@/lib/knowledge-points";
 
@@ -198,7 +199,17 @@ function TrainingRow({
       </div>
       {!done ? (
         <Button asChild variant="ghost" size="sm" className="shrink-0 rounded-lg px-2">
-          <Link to="/app/review">
+          <Link
+            to="/app/review"
+            onClick={() => {
+              void recordProductAnalyticsEvent("training_go_click", {
+                subject: item.subject,
+                task_type: item.task_type,
+                knowledge_point: item.knowledge_point,
+                label: `${item.task_type} · ${item.knowledge_point}`,
+              });
+            }}
+          >
             去练
             <ChevronRight className="ml-0.5 h-3.5 w-3.5" />
           </Link>
