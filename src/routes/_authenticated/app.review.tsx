@@ -18,8 +18,17 @@ import { compressImageToDataUrl } from "@/lib/image-compress";
 import {
   analyzeQuestionPhoto,
   normalizePhotoMarkdown,
+  SAGE_PHOTO_MD_MARKER,
+  stripPhotoContentForChatApi,
+  unwrapPhotoMarkdown,
   wrapPhotoMarkdown,
 } from "@/lib/question-photo-analysis";
+import {
+  formatQuizKeysForCoachHint,
+  isPhotoQuizRevealRequest,
+  PHOTO_QUIZ_REVEAL_EVENT,
+} from "@/lib/photo-quiz-parse";
+import { ingestPhotoEvidence } from "@/lib/knowledge-tracking/ingest-client";
 import {
   isPhotoOnlyMessageContent,
   SAGE_PHOTO_MESSAGE_MARKER,
@@ -230,6 +239,11 @@ function createChatsBySubject(): Record<string, SubjectChatCache> {
 const SPRINT_EXAM_MAX_DAYS = 30;
 const SUMMARY_STREAM_TIMEOUT_MS = 10_000;
 
+/** Stable key for subject + session scope; guards all async message/summary writes. */
+function reviewScopeKey(subject: string, slug: string | null): string {
+  return `${subject}\0${slug ?? ""}`;
+}
+
 function Review() {
   const { user } = useAuth();
   const qc = useQueryClient();
@@ -269,19 +283,14 @@ function Review() {
   const [chatRetrying, setChatRetrying] = useState(false);
   const [deleteDialogSession, setDeleteDialogSession] = useState<SessionRow | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const slugResolveGenRef = useRef(0);
   const slugNavSourceRef = useRef<"control" | "sidebar" | "plus" | "opening">("control");
   const sendAbortRef = useRef<AbortController | null>(null);
   /** When true, the next subject-driven effect must not clear session (sidebar / session picker just set subject+date+slug). */
   const preserveSessionFromPickerRef = useRef(false);
   const skipSubjectScopeEffectRef = useRef(false);
   const chatsBySubject = useRef<Record<string, SubjectChatCache>>(createChatsBySubject());
-  /** Synchronous guards for async fetch / render (avoids race on fast tab switch). */
-  /** messages 与 summary 共用：切换科目时第一步更新，异步写入前必须校验。 */
-  const activeSubjectRef = useRef(subject);
-  const activeSessionSlugRef = useRef<string | null>(activeSessionSlug);
-  activeSessionSlugRef.current = activeSessionSlug;
-  const historyLoadGenRef = useRef(0);
+  /** messages 与 summary 共用：切换科目/场次时第一步更新，异步写入前必须校验。 */
+  const activeKeyRef = useRef(reviewScopeKey(subject, null));
 
   /** When true, DB rows must not repopulate chat (e.g. after「结束复盘」). */
   const suppressChatMessagesSyncRef = useRef(false);
@@ -290,11 +299,10 @@ function Review() {
   const [historyFetching, setHistoryFetching] = useState(false);
 
   const applyActiveSessionSlug = useCallback((slug: string | null) => {
-    activeSessionSlugRef.current = slug;
     setActiveSessionSlugState(slug);
   }, []);
 
-  /** 异步拉取历史；仅在 ref 仍指向 targetSubject 时写入 messages。 */
+  /** 异步拉取历史；仅在 activeKeyRef 仍指向 targetKey 时写入 messages。 */
   const loadHistory = useCallback(
     async (targetSubject: string, targetSlug: string | null) => {
       if (!user?.id || !targetSlug || suppressChatMessagesSyncRef.current) {
@@ -302,7 +310,7 @@ function Review() {
         setHistoryFetching(false);
         return;
       }
-      const gen = ++historyLoadGenRef.current;
+      const targetKey = reviewScopeKey(targetSubject, targetSlug);
       setSubjectChatLoading(true);
       setHistoryFetching(true);
       try {
@@ -314,15 +322,7 @@ function Review() {
           .eq("review_subject", targetSubject)
           .in("role", ["user", "assistant"])
           .order("created_at", { ascending: true });
-        if (historyLoadGenRef.current !== gen) return;
-        if (activeSubjectRef.current !== targetSubject) {
-          console.log("科目已切换，丢弃数据", targetSubject);
-          return;
-        }
-        if (activeSessionSlugRef.current !== targetSlug) {
-          console.log("场次已切换，丢弃数据", targetSlug);
-          return;
-        }
+        if (activeKeyRef.current !== targetKey) return;
         if (error) {
           console.warn("[review-messages] loadHistory", error);
           return;
@@ -344,7 +344,7 @@ function Review() {
       } catch (e) {
         console.warn("[review-messages] loadHistory", e);
       } finally {
-        if (historyLoadGenRef.current === gen) {
+        if (activeKeyRef.current === targetKey) {
           setSubjectChatLoading(false);
           setHistoryFetching(false);
         }
@@ -381,11 +381,6 @@ function Review() {
   const onboardingIncomplete =
     profileFlagsReady && profileFlags?.needsGuidedReviewOnboarding === true;
 
-  const bumpSessionScope = useCallback(() => {
-    slugResolveGenRef.current += 1;
-    return slugResolveGenRef.current;
-  }, []);
-
   const resetChatUiForScopeChange = useCallback(() => {
     sendAbortRef.current?.abort();
     sendAbortRef.current = null;
@@ -408,23 +403,14 @@ function Review() {
     }
   }, []);
 
-  const isSubjectScopeCurrent = useCallback((targetSubject: string, targetSlug: string | null) => {
-    if (activeSubjectRef.current !== targetSubject) return false;
-    if (targetSlug != null && activeSessionSlugRef.current !== targetSlug) return false;
-    return true;
-  }, []);
-
-  /** 切换科目/场次：同步清空所有与当前科相关的 UI 状态（调用前须已更新 activeSubjectRef）。 */
+  /** 切换科目/场次后的其余 UI 重置（messages/summary 由 handleSubjectChange 同步清空）。 */
   const clearSubjectScopedUi = useCallback(() => {
-      historyLoadGenRef.current += 1;
       suppressChatMessagesSyncRef.current = false;
       summaryCardScopeRef.current = null;
       clearSummaryStreamTimeout();
       sendAbortRef.current?.abort();
       sendAbortRef.current = null;
-      setMessages([]);
       setMessageRows([]);
-      setSessionCard(null);
       setSubjectChatLoading(true);
       setHistoryFetching(false);
       setIsSummarySubmitting(false);
@@ -452,25 +438,15 @@ function Review() {
     [],
   );
 
-  /** 若该场次已有小结，异步加载；写入前校验科目/场次未变。 */
+  /** 若该场次已有小结，异步加载；写入前校验 scope key 未变。 */
   const loadExistingSummary = useCallback(
     async (targetSubject: string, targetSlug: string | null, sessionDate: string) => {
       if (!user?.id || !targetSlug) return;
+      const targetKey = reviewScopeKey(targetSubject, targetSlug);
       try {
         const existing = await findExistingReviewSummary(targetSlug, supabase);
-        if (activeSubjectRef.current !== targetSubject) {
-          console.log("summary: 科目已切换，丢弃", targetSubject);
-          return;
-        }
-        if (!isSubjectScopeCurrent(targetSubject, targetSlug)) {
-          console.log("summary: 科目已切换，丢弃", targetSubject);
-          return;
-        }
+        if (activeKeyRef.current !== targetKey) return;
         if (!existing) return;
-        if (activeSubjectRef.current !== targetSubject) {
-          console.log("summary: 科目已切换，丢弃", targetSubject);
-          return;
-        }
         console.log("[review-summary] loaded existing summary for session", {
           sessionSlug: targetSlug,
           subject: existing.subject,
@@ -490,14 +466,14 @@ function Review() {
         console.warn("[review-summary] loadExistingSummary", e);
       }
     },
-    [user?.id, isSubjectScopeCurrent, pinSummaryCardScope],
+    [user?.id, pinSummaryCardScope],
   );
 
-  /** 切换科目：第一步更新 activeSubjectRef，同步清空 messages/summary，再异步加载。 */
+  /** 切换科目/场次：第一步更新 activeKeyRef，同步清空 messages/summary，再异步加载。 */
   const handleSubjectChange = useCallback(
     (newSubject: string, slug: string | null, date: string) => {
-      activeSubjectRef.current = newSubject;
-      console.log("切换科目，清空messages");
+      const newKey = reviewScopeKey(newSubject, slug);
+      activeKeyRef.current = newKey;
       setMessages([]);
       setSessionCard(null);
       clearSubjectScopedUi();
@@ -532,14 +508,12 @@ function Review() {
   const clearCurrentSubjectChat = useCallback(() => {
     if (onboardingIncomplete) return;
     chatsBySubject.current[subject] = emptySubjectChatCache();
-    bumpSessionScope();
     resetChatUiForScopeChange();
     handleSubjectChange(subject, null, localYmd());
   }, [
     subject,
     onboardingIncomplete,
     handleSubjectChange,
-    bumpSessionScope,
     resetChatUiForScopeChange,
   ]);
 
@@ -547,11 +521,10 @@ function Review() {
     (row: { subject: string; session_date: string; session_slug: string }) => {
       preserveSessionFromPickerRef.current = true;
       slugNavSourceRef.current = "sidebar";
-      bumpSessionScope();
       resetChatUiForScopeChange();
       handleSubjectChange(row.subject, row.session_slug, row.session_date);
     },
-    [handleSubjectChange, bumpSessionScope, resetChatUiForScopeChange],
+    [handleSubjectChange, resetChatUiForScopeChange],
   );
 
   const { data: examRows = [] } = useQuery({
@@ -577,10 +550,12 @@ function Review() {
   useEffect(() => {
     if (!profileFlagsReady) return;
     if (profileFlags?.needsGuidedReviewOnboarding === true) {
-      slugResolveGenRef.current += 1;
       applyActiveSessionSlug(null);
-      activeSubjectRef.current = ONBOARDING_REVIEW_SUBJECT;
-      setSubject(ONBOARDING_REVIEW_SUBJECT);
+      const sub = ONBOARDING_REVIEW_SUBJECT;
+      activeKeyRef.current = reviewScopeKey(sub, null);
+      setMessages([]);
+      setSessionCard(null);
+      setSubject(sub);
       setSelectedDate(localYmd());
     }
   }, [profileFlagsReady, profileFlags?.needsGuidedReviewOnboarding, applyActiveSessionSlug]);
@@ -599,14 +574,12 @@ function Review() {
       skipSubjectScopeEffectRef.current = false;
       return;
     }
-    bumpSessionScope();
     resetChatUiForScopeChange();
     handleSubjectChange(subject, null, localYmd());
   }, [
     subject,
     onboardingIncomplete,
     handleSubjectChange,
-    bumpSessionScope,
     resetChatUiForScopeChange,
   ]);
 
@@ -674,10 +647,8 @@ function Review() {
 
       const sub = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subjectRef.current;
       const dt = selectedDateRef.current;
-      slugResolveGenRef.current += 1;
       slugNavSourceRef.current = "opening";
       const openingSlug = crypto.randomUUID();
-      applyActiveSessionSlug(openingSlug);
       const opening = onboardingIncomplete
         ? REVIEW_GUIDED_FIRST_OPENING
         : REVIEW_RETURNING_FIRST_OPENING;
@@ -696,7 +667,6 @@ function Review() {
         return;
       }
       slugNavSourceRef.current = "control";
-      slugResolveGenRef.current += 1;
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["review-prior-any", uid] }),
         qc.invalidateQueries({ queryKey: ["review-sessions-index", uid] }),
@@ -707,7 +677,7 @@ function Review() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, hasAnyReviewMessages, profileFlagsReady, onboardingIncomplete, qc, handleSubjectChange, applyActiveSessionSlug]);
+  }, [user?.id, hasAnyReviewMessages, profileFlagsReady, onboardingIncomplete, qc, handleSubjectChange]);
 
   const { data: sessionIndex = [] } = useQuery({
     queryKey: ["review-sessions-index", user?.id],
@@ -835,8 +805,6 @@ function Review() {
     (nextSubject: string) => {
       if (onboardingIncomplete || nextSubject === subject) return;
 
-      bumpSessionScope();
-
       chatsBySubject.current[subject] = subjectsWithEndedReview.has(subject)
         ? emptySubjectChatCache()
         : {
@@ -893,11 +861,9 @@ function Review() {
       sessionCard,
       sessionIndex,
       handleSubjectChange,
-      bumpSessionScope,
       resetChatUiForScopeChange,
       onboardingIncomplete,
       subjectsWithEndedReview,
-      pinSummaryCardScope,
     ],
   );
 
@@ -934,23 +900,15 @@ function Review() {
     summaryInFlightRef.current = true;
     const summarySlug = activeSessionSlug;
     const summarySubject = chatSubject;
-    const summaryGen = slugResolveGenRef.current;
-    const scopeOk = () => isSubjectScopeCurrent(summarySubject, summarySlug);
+    const targetKey = reviewScopeKey(summarySubject, summarySlug);
 
     const applySessionCard = (card: SessionCardState) => {
-      if (activeSubjectRef.current !== summarySubject) {
-        console.log("summary: 科目已切换，丢弃", summarySubject);
-        return;
-      }
-      if (!scopeOk()) {
-        console.log("summary: 科目已切换，丢弃", summarySubject);
-        return;
-      }
+      if (activeKeyRef.current !== targetKey) return;
       setSessionCard(card);
     };
 
     const failSummary = (message: string) => {
-      if (!scopeOk()) return;
+      if (activeKeyRef.current !== targetKey) return;
       clearSummaryStreamTimeout();
       summaryDoneKeysRef.current.delete(key);
       summaryCardScopeRef.current = null;
@@ -964,15 +922,8 @@ function Review() {
 
     try {
       const existing = await findExistingReviewSummary(summarySlug, supabase);
-      if (activeSubjectRef.current !== summarySubject) {
-        console.log("summary: 科目已切换，丢弃", summarySubject);
-        return;
-      }
+      if (activeKeyRef.current !== targetKey) return;
       if (existing) {
-        if (activeSubjectRef.current !== summarySubject) {
-          console.log("summary: 科目已切换，丢弃", summarySubject);
-          return;
-        }
         console.log("[review-summary] loaded existing summary for session", {
           sessionSlug: summarySlug,
           subject: existing.subject,
@@ -1004,11 +955,7 @@ function Review() {
         failSummary("生成失败，点击重试");
         return;
       }
-      if (slugResolveGenRef.current !== summaryGen || !scopeOk()) {
-        if (!scopeOk()) console.log("summary: 科目已切换，丢弃", summarySubject);
-        else failSummary("生成失败，点击重试");
-        return;
-      }
+      if (activeKeyRef.current !== targetKey) return;
 
       const historyRows = filterCoachMessagesForSession(
         histRows ?? [],
@@ -1086,10 +1033,7 @@ function Review() {
         });
       }
       if (!parsed) throw new Error("parse");
-      if (!scopeOk()) {
-        console.log("summary: 科目已切换，丢弃", summarySubject);
-        return;
-      }
+      if (activeKeyRef.current !== targetKey) return;
 
       const row = buildReviewSummaryInsertRow({
         userId: user.id,
@@ -1113,7 +1057,7 @@ function Review() {
         follow_up: parsed.follow_up,
         mastered: parsed.mastered,
       });
-      if (!scopeOk()) return;
+      if (activeKeyRef.current !== targetKey) return;
       pinSummaryCardScope(summarySubject, selectedDate, summarySlug);
 
       const { error: profileErr } = await supabase
@@ -1192,7 +1136,6 @@ function Review() {
     activeSessionSlug,
     clearSummaryStreamTimeout,
     pinSummaryCardScope,
-    isSubjectScopeCurrent,
   ]);
 
   const send = useCallback(async () => {
@@ -1201,13 +1144,17 @@ function Review() {
     const userText = text || (imageSnapshot ? "请帮我分析这道题目" : "");
     if (!userText || !user?.id || isSending) return;
 
+    const wantsQuizReveal = !imageSnapshot && isPhotoQuizRevealRequest(userText);
+    if (wantsQuizReveal) {
+      window.dispatchEvent(new CustomEvent(PHOTO_QUIZ_REVEAL_EVENT));
+    }
+
     if (imageSnapshot) {
       setPhotoAnalysisLoading(true);
       setStreamingPhotoMarkdown(null);
       setStreamAssistantText(null);
     }
 
-    const sendGen = slugResolveGenRef.current;
     const scopeSubject = chatSubject;
     const scopeDate = selectedDate;
 
@@ -1220,16 +1167,17 @@ function Review() {
     setStreamingPhotoMarkdown(null);
     let clearedDraft = false;
 
-    const scopeStale = () => slugResolveGenRef.current !== sendGen;
+    let sessionSlug = activeSessionSlug;
+    if (!sessionSlug) {
+      sessionSlug = crypto.randomUUID();
+      slugNavSourceRef.current = "plus";
+      applyActiveSessionSlug(sessionSlug);
+      activeKeyRef.current = reviewScopeKey(scopeSubject, sessionSlug);
+    }
+    const targetKey = reviewScopeKey(scopeSubject, sessionSlug);
+    const scopeStale = () => activeKeyRef.current !== targetKey;
 
     try {
-      let sessionSlug = activeSessionSlug;
-      if (!sessionSlug) {
-        sessionSlug = crypto.randomUUID();
-        slugNavSourceRef.current = "plus";
-        applyActiveSessionSlug(sessionSlug);
-      }
-
       if (scopeStale()) return;
 
       let photoDataUrl: string | null = null;
@@ -1313,17 +1261,38 @@ function Review() {
         setStreamingPhotoMarkdown(markdown);
 
         const reply = wrapPhotoMarkdown(markdown);
-        const { error: aErr } = await supabase.from("coach_messages").insert({
-          user_id: user.id,
-          role: "assistant",
-          content: reply,
-          review_subject: scopeSubject,
-          review_session_date: scopeDate,
-          review_session_slug: sessionSlug,
-        });
+        const { data: assistantRow, error: aErr } = await supabase
+          .from("coach_messages")
+          .insert({
+            user_id: user.id,
+            role: "assistant",
+            content: reply,
+            review_subject: scopeSubject,
+            review_session_date: scopeDate,
+            review_session_slug: sessionSlug,
+          })
+          .select("id")
+          .single();
         if (aErr) throw aErr;
 
         if (scopeStale()) return;
+
+        if (assistantRow?.id) {
+          void ingestPhotoEvidence({
+            coach_message_id: assistantRow.id,
+            subject: scopeSubject as import("@/lib/subjects").Subject,
+            session_date: scopeDate,
+            session_slug: sessionSlug,
+            analysis_markdown: markdown,
+          }).then((res) => {
+            const n = res.extraction.knowledge_points.length;
+            if (n > 0) {
+              toast.success(`已记录 ${n} 个知识点到掌握度档案`);
+            }
+          }).catch((e) => {
+            console.warn("[knowledge-ingest]", e);
+          });
+        }
 
         await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
         setStreamingPhotoMarkdown(null);
@@ -1349,24 +1318,40 @@ function Review() {
         scopeSubject,
       );
 
-      const sys = buildReviewDeepSeekSystemPrompt({
-        subject: scopeSubject,
-        sessionDate: scopeDate,
-        onboardingIncomplete,
-        sprintMode,
-      });
+      let sysExtra = "";
+      if (wantsQuizReveal) {
+        const photoRow = [...historyForApi]
+          .reverse()
+          .find((m) => m.role === "assistant" && m.content.startsWith(SAGE_PHOTO_MD_MARKER));
+        if (photoRow) {
+          const hint = formatQuizKeysForCoachHint(
+            unwrapPhotoMarkdown(photoRow.content).markdown,
+          );
+          if (hint) {
+            sysExtra = `\n\n【拍照巩固题·对答案】学生要对巩固题答案。参考答案：\n${hint}\n请逐题确认对错并简要讲解解析，不要出新题。`;
+          }
+        }
+      }
+
+      const sys =
+        buildReviewDeepSeekSystemPrompt({
+          subject: scopeSubject,
+          sessionDate: scopeDate,
+          onboardingIncomplete,
+          sprintMode,
+        }) + sysExtra;
       const apiMessages = [
         { role: "system" as const, content: sys },
         ...historyForApi.map((m) => ({
           role: m.role as "user" | "assistant",
-          content: m.content,
+          content: stripPhotoContentForChatApi(m.content),
         })),
       ];
       if (import.meta.env.DEV) {
         console.log("[review-send] DeepSeek request", {
           sessionSlug,
           reviewSubject: scopeSubject,
-          sendGen,
+          targetKey,
           historyRows: historyForApi.length,
         });
       }
@@ -1474,7 +1459,6 @@ function Review() {
     sprintMode,
     activeSessionSlug,
     applyActiveSessionSlug,
-    bumpSessionScope,
     runSilentSummary,
     subjectsWithEndedReview,
     handleClearImage,
@@ -1503,10 +1487,8 @@ function Review() {
     }
     if (!activeSessionSlug) return;
 
-    console.log("切换科目，清空messages");
     setMessages([]);
     suppressChatMessagesSyncRef.current = true;
-    historyLoadGenRef.current += 1;
     setSubjectsWithEndedReview((prev) => new Set(prev).add(chatSubject));
 
     if (summaryDoneKeysRef.current.has(activeSessionSlug)) {
@@ -1561,9 +1543,6 @@ function Review() {
       const subj = onboardingIncomplete ? ONBOARDING_REVIEW_SUBJECT : subject;
       const newSlug = crypto.randomUUID();
       slugNavSourceRef.current = "plus";
-      slugResolveGenRef.current += 1;
-      setSelectedDate(today);
-      applyActiveSessionSlug(newSlug);
 
       const { error: iErr } = await supabase.from("coach_messages").insert({
         user_id: user.id,
@@ -1577,13 +1556,12 @@ function Review() {
 
       slugNavSourceRef.current = "control";
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
-      activeSubjectRef.current = subj;
-      void loadHistory(subj, newSlug);
+      handleSubjectChange(subj, newSlug, today);
     } catch (e) {
       console.warn("[startTodaySession]", e);
       slugNavSourceRef.current = "control";
     }
-  }, [user?.id, qc, onboardingIncomplete, subject, loadHistory, applyActiveSessionSlug]);
+  }, [user?.id, qc, onboardingIncomplete, subject, handleSubjectChange]);
 
   const confirmDeleteSession = useCallback(async () => {
     const row = deleteDialogSession;
@@ -2020,7 +1998,6 @@ function Review() {
               <Select
                 value={selectedDate}
                 onValueChange={(d) => {
-                  bumpSessionScope();
                   resetChatUiForScopeChange();
                   handleSubjectChange(subject, null, d);
                 }}

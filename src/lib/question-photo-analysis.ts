@@ -33,29 +33,47 @@ export const QUESTION_PHOTO_SYSTEM_PROMPT = `你是高考/大学学习助教。�
    - 解题过程：每个步骤用 ## 步骤1：xxx 单独一行，段与段之间空一行
    - ### 核心知识点（- 列表，每条一行）
    - 行内公式 $...$，独立公式 $$...$$
-   - 最后出 **3 道**同类巩固选择题，每题必须用以下块（不要用 ### 巩固题 标题）：
+   - 最后出 **3 道**同类巩固选择题，每题必须用以下块（不要用 ### 巩固题 标题）。
+   巩固题**先只出题**，答案与解析放在紧随其后的隐藏块（界面不会直接展示，等学生对答案时再揭晓）：
 
 --- QUIZ ---
+本题考查[具体考点]，与原题相同
 题目：xxx
 A. xxx
 B. xxx
 C. xxx
 D. xxx
+--- END QUIZ ---
+--- QUIZ KEY ---
 答案：B
 解析：xxx
---- END QUIZ ---
+--- END QUIZ KEY ---
+
+   巩固题全部出完后，单独一行提示：「做完后在对话框发送「对答案」或「做完了」，我会给出答案与解析。」
+
+   解题要求：
+   - 每一步计算必须独立成行，不要在一行里堆砌多个等式
+   - 计算结果有疑问时直接说「此步需验证」，不要强行给出错误结论
+   - 最终答案用【答案：xxx】单独一行标出
 
 4. 【概念/问答题】（历史、政治、生物、语文等文字阐述题）
    用 markdown 输出：
    - ## 答题要点（分点列出）
    - ### 相关知识点（- 列表）
-   - 最后出 **2 道**同类巩固选择题，每题用 --- QUIZ --- ... --- END QUIZ --- 块（格式同上）。
+   - 最后出 **2 道**同类巩固选择题：格式同类型 3（--- QUIZ --- 只含题目与选项，--- QUIZ KEY --- 含答案与解析），并在题后提示对答案方式。
 
 通用要求：
 - 绝对不要把所有内容挤在同一段；段落之间空一行。
 - 仅类型 3、4 才输出 --- QUIZ ---；类型 1、2 禁止输出任何巩固题。
 - 不要用 JSON，不要用代码块包裹整段回复。
-- QUIZ 块内：题目、A/B/C/D、答案、解析各占一行；答案行只写字母（如 B）。`;
+- QUIZ 块内：本题考查行、题目、A/B/C/D 各占一行；**禁止**在 QUIZ 块内写答案或解析。
+- QUIZ KEY 块内：答案、解析各占一行；答案行只写字母（如 B）；每道 QUIZ 必须紧跟一个 QUIZ KEY。
+
+【重要】巩固题必须与上面这道题完全相同的题型和考点：
+- 如果原题是圆锥曲线求弦长，巩固题也必须是圆锥曲线求弦长
+- 如果原题是交替级数收敛判断，巩固题也必须是同类
+- 禁止出现与原题考点无关的题目
+- 每道巩固题出题前先说明：本题考查[具体考点]，与原题相同`;
 
 /** Strip fences and fix common glued heading/paragraph breaks from model output. */
 export function normalizePhotoMarkdown(raw: string): string {
@@ -90,6 +108,25 @@ export function unwrapPhotoMarkdown(content: string): {
     };
   }
   return { isPhotoAnalysis: false, markdown: content };
+}
+
+const QUIZ_KEY_BLOCK_RE =
+  /---\s*QUIZ\s*KEY\s*---[\s\S]*?---\s*END\s*QUIZ\s*KEY\s*---/gi;
+
+export function hasHiddenQuizKeys(markdown: string): boolean {
+  return /---\s*QUIZ\s*KEY\s*---/i.test(markdown);
+}
+
+/** Remove hidden answer blocks before showing or sending photo markdown to chat API. */
+export function stripHiddenQuizKeysFromMarkdown(markdown: string): string {
+  return markdown.replace(QUIZ_KEY_BLOCK_RE, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/** Strip hidden quiz keys from persisted photo assistant content for DeepSeek history. */
+export function stripPhotoContentForChatApi(content: string): string {
+  const { isPhotoAnalysis, markdown } = unwrapPhotoMarkdown(content);
+  if (!isPhotoAnalysis) return content;
+  return wrapPhotoMarkdown(stripHiddenQuizKeysFromMarkdown(markdown));
 }
 
 export async function analyzeQuestionPhoto(

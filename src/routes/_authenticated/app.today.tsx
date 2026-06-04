@@ -16,9 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
-  sageHookCardClass,
   subjectAccentCardClass,
-  subjectAccentTaskClass,
   todayHeroShellClass,
 } from "@/lib/subject-accent";
 import {
@@ -37,7 +35,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-// import { DailyQuestionCard } from "@/components/daily-question-card";
+import { KnowledgeTodayPanel } from "@/components/knowledge-today-panel";
+import { SAGE_KNOWLEDGE_REFRESH_EVENT } from "@/lib/knowledge-tracking/ingest-client";
 
 export const Route = createFileRoute("/_authenticated/app/today")({ component: Today });
 
@@ -80,28 +79,6 @@ async function fetchTodayDailyProgress(userId: string): Promise<{ subjectCount: 
   }
 }
 
-async function fetchPendingSageHook(userId: string): Promise<string | null> {
-  try {
-    const todayYmd = localYmd();
-    const { data, error } = await supabase
-      .from("review_summaries")
-      .select("follow_up")
-      .eq("user_id", userId)
-      .not("follow_up", "is", null)
-      .neq("follow_up", "")
-      .lt("session_date", todayYmd)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    const t = data?.follow_up?.trim();
-    return t && t.length > 0 ? t : null;
-  } catch (e) {
-    console.warn("[today-sage-hook]", e);
-    return null;
-  }
-}
-
 type ProfileRow = {
   display_name?: string | null;
   current_score?: number | null;
@@ -111,46 +88,6 @@ type ProfileRow = {
 type EditingField = "target" | "current" | null;
 
 const SPRINT_EXAM_MAX_DAYS = 30;
-
-type TodayTaskRow = {
-  id: string;
-  subject: string;
-  tonight_task: string;
-  completed: boolean;
-};
-
-async function fetchTodayTasks(userId: string, opts?: { limit?: number }): Promise<TodayTaskRow[]> {
-  try {
-    const cap = opts?.limit ?? 3;
-    const { data: summaries, error: sErr } = await supabase
-      .from("review_summaries")
-      .select("id,subject,tonight_task,created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(24);
-    if (sErr) throw sErr;
-    const trimmed = (summaries ?? []).filter((r) => String(r.tonight_task ?? "").trim() !== "");
-    const top = trimmed.slice(0, cap);
-    if (top.length === 0) return [];
-    const ids = top.map((r) => r.id);
-    const { data: comps, error: cErr } = await supabase
-      .from("task_completions")
-      .select("review_summary_id,completed")
-      .eq("user_id", userId)
-      .in("review_summary_id", ids);
-    if (cErr) throw cErr;
-    const map = new Map((comps ?? []).map((c) => [c.review_summary_id, c.completed]));
-    return top.map((r) => ({
-      id: r.id,
-      subject: r.subject,
-      tonight_task: String(r.tonight_task).trim(),
-      completed: map.get(r.id) ?? false,
-    }));
-  } catch (e) {
-    console.warn("[today-tasks]", e);
-    return [];
-  }
-}
 
 function Today() {
   const { user } = useAuth();
@@ -253,14 +190,18 @@ function Today() {
     const onRefresh = () => {
       if (!user?.id) return;
       void qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] });
-      void qc.invalidateQueries({ queryKey: ["today-tasks", user.id] });
       void qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] });
       void qc.invalidateQueries({ queryKey: ["user-exams", user.id] });
       void qc.invalidateQueries({ queryKey: diagnosticEligibilityQueryKey(user.id) });
       void qc.invalidateQueries({ queryKey: ["knowledge-points", user.id] });
+      window.dispatchEvent(new CustomEvent(SAGE_KNOWLEDGE_REFRESH_EVENT));
     };
     window.addEventListener("sage-weak-archive-refresh", onRefresh);
-    return () => window.removeEventListener("sage-weak-archive-refresh", onRefresh);
+    window.addEventListener(SAGE_KNOWLEDGE_REFRESH_EVENT, onRefresh);
+    return () => {
+      window.removeEventListener("sage-weak-archive-refresh", onRefresh);
+      window.removeEventListener(SAGE_KNOWLEDGE_REFRESH_EVENT, onRefresh);
+    };
   }, [user?.id, qc]);
 
   const loadProfile = useCallback(async () => {
@@ -286,19 +227,6 @@ function Today() {
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
-
-  const {
-    data: tasks = [],
-    isLoading: tasksLoading,
-    isError: tasksError,
-  } = useQuery({
-    queryKey: ["today-tasks", user?.id, examSprint ? 1 : 3],
-    enabled: !!user?.id,
-    queryFn: () =>
-      raceQueryTimeout(TODAY_FETCH_MS, [], () =>
-        fetchTodayTasks(user!.id, { limit: examSprint ? 1 : 3 }),
-      ),
-  });
 
   const {
     data: archiveRows = [],
@@ -332,15 +260,6 @@ function Today() {
       raceQueryTimeout(TODAY_FETCH_MS, { subjectCount: 0, clearedCount: 0 }, () =>
         fetchTodayDailyProgress(user!.id),
       ),
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: true,
-  });
-
-  const { data: pendingFollowUp } = useQuery({
-    queryKey: ["today-sage-hook", user?.id],
-    enabled: !!user?.id,
-    queryFn: () =>
-      raceQueryTimeout(TODAY_FETCH_MS, null, () => fetchPendingSageHook(user!.id)),
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
@@ -444,13 +363,6 @@ function Today() {
   const toggleTaskComplete = useCallback(
     async (summaryId: string, completed: boolean) => {
       if (!user?.id) return;
-      const prev = qc.getQueryData<TodayTaskRow[]>(["today-tasks", user.id]);
-      if (prev) {
-        qc.setQueryData<TodayTaskRow[]>(
-          ["today-tasks", user.id],
-          prev.map((t) => (t.id === summaryId ? { ...t, completed } : t)),
-        );
-      }
       const prevArch = qc.getQueryData<WeakArchiveRow[]>(["weak-point-archive", user.id]);
       if (prevArch) {
         qc.setQueryData<WeakArchiveRow[]>(
@@ -461,14 +373,11 @@ function Today() {
       const { error } = await persistTaskCompletion(user.id, summaryId, completed);
       if (error) {
         toast.error(error.message);
-        await qc.invalidateQueries({ queryKey: ["today-tasks", user.id] });
         await qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] });
         return;
       }
-      await qc.invalidateQueries({ queryKey: ["today-tasks", user.id] });
       await qc.invalidateQueries({ queryKey: ["weak-point-archive", user.id] });
       await qc.invalidateQueries({ queryKey: ["today-daily-progress", user.id] });
-      await qc.invalidateQueries({ queryKey: ["today-sage-hook", user.id] });
     },
     [user?.id, qc],
   );
@@ -605,83 +514,13 @@ function Today() {
         </section>
       ) : null}
 
-      {pendingFollowUp ? (
-        <section
-          className={cn(
-            "shrink-0 rounded-3xl border border-amber-200/70 bg-amber-50/90 p-4 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/30",
-            sageHookCardClass,
-          )}
-          aria-label="Sage 跟进"
-        >
-          <p className="text-sm font-semibold text-amber-950 dark:text-amber-50">Sage 在等你汇报</p>
-          <p className="mt-2 text-sm leading-relaxed text-amber-900/95 dark:text-amber-100/90">
-            {pendingFollowUp}
-          </p>
-          <Button asChild className="mt-4 rounded-xl" size="sm" variant="secondary">
-            <Link to="/app/review">去复盘 →</Link>
-          </Button>
-        </section>
-      ) : null}
+      {user?.id ? <KnowledgeTodayPanel userId={user.id} /> : null}
 
       {/* 每日一问：暂时关闭（题目质量优化后再开）。保留实现于 components/daily-question-card.tsx + lib/daily-question.ts
       {user?.id ? (
         <DailyQuestionCard userId={user.id} questionDate={localYmd()} enabled={showDailyQuestion} />
       ) : null}
       */}
-
-      <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
-        <h2 className="text-sm font-semibold tracking-tight">今日任务</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">来自最近一次复盘的「今晚任务」，最多显示 3 条。</p>
-
-        {tasksError ? (
-          <p className="mt-4 text-sm text-destructive">
-            任务加载失败。若刚部署数据库，请先执行迁移（含 task_completions 表）。
-          </p>
-        ) : tasksLoading && !loadDeadlinePassed ? (
-          <p className="mt-4 text-sm text-muted-foreground">加载任务…</p>
-        ) : tasksLoading && loadDeadlinePassed ? (
-          <p className="mt-4 text-sm text-muted-foreground">任务加载较慢，请稍后再试或刷新页面。</p>
-        ) : tasks.length === 0 ? (
-          <div className="mt-4 rounded-2xl border border-dashed border-border bg-muted/30 p-5 text-center">
-            <p className="text-sm text-foreground">
-              还没有今日任务。去复盘一科，Sage 会告诉你今晚该做什么。
-            </p>
-            <Button asChild className="mt-4 rounded-xl" size="sm">
-              <Link to="/app/review">开始复盘 →</Link>
-            </Button>
-          </div>
-        ) : (
-          <ul className="mt-4 space-y-3">
-            {tasks.map((t) => (
-              <li
-                key={t.id}
-                className={cn(
-                  "flex gap-3 overflow-hidden rounded-2xl border border-border bg-card px-3 py-3 shadow-sm",
-                  subjectAccentTaskClass(t.subject),
-                )}
-              >
-                <Checkbox
-                  id={`task-${t.id}`}
-                  checked={t.completed}
-                  onCheckedChange={(v) => void toggleTaskComplete(t.id, v === true)}
-                  className="mt-1 shrink-0"
-                  aria-label={`标记完成：${t.subject}`}
-                />
-                <label htmlFor={`task-${t.id}`} className="min-w-0 flex-1 cursor-pointer">
-                  <p
-                    className={cn(
-                      "text-sm leading-relaxed text-foreground",
-                      t.completed && "text-muted-foreground line-through",
-                    )}
-                  >
-                    {t.tonight_task}
-                  </p>
-                </label>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
       <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -852,7 +691,6 @@ function ExamScheduleDialog({
 
   const invalidateExamData = () => {
     void qc.invalidateQueries({ queryKey: ["user-exams", userId] });
-    void qc.invalidateQueries({ queryKey: ["today-tasks", userId] });
   };
 
   const saveForm = async () => {

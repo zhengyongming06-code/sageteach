@@ -22,6 +22,7 @@ import { Route as AuthenticatedAppReviewRouteImport } from './routes/_authentica
 import { Route as AuthenticatedAppDiagnosticRouteImport } from './routes/_authenticated/app.diagnostic'
 import { Route as AuthenticatedAppCoachRouteImport } from './routes/_authenticated/app.coach'
 import { Route as AuthenticatedAppReviewArchiveRouteImport } from './routes/_authenticated/app.review.archive'
+import { Route as AuthenticatedAppAdminAnalyticsRouteImport } from './routes/_authenticated/app.admin.analytics'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -89,6 +90,12 @@ const AuthenticatedAppReviewArchiveRoute =
     path: '/archive',
     getParentRoute: () => AuthenticatedAppReviewRoute,
   } as any)
+const AuthenticatedAppAdminAnalyticsRoute =
+  AuthenticatedAppAdminAnalyticsRouteImport.update({
+    id: '/admin/analytics',
+    path: '/admin/analytics',
+    getParentRoute: () => AuthenticatedAppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByFullPath {
   '/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
   '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
+  '/app/admin/analytics': typeof AuthenticatedAppAdminAnalyticsRoute
   '/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
 }
 export interface FileRoutesByTo {
@@ -116,6 +124,7 @@ export interface FileRoutesByTo {
   '/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
   '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
+  '/app/admin/analytics': typeof AuthenticatedAppAdminAnalyticsRoute
   '/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
 }
 export interface FileRoutesById {
@@ -132,6 +141,7 @@ export interface FileRoutesById {
   '/_authenticated/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
   '/_authenticated/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/_authenticated/app/today': typeof AuthenticatedAppTodayRoute
+  '/_authenticated/app/admin/analytics': typeof AuthenticatedAppAdminAnalyticsRoute
   '/_authenticated/app/review/archive': typeof AuthenticatedAppReviewArchiveRoute
 }
 export interface FileRouteTypes {
@@ -148,6 +158,7 @@ export interface FileRouteTypes {
     | '/app/diagnostic'
     | '/app/review'
     | '/app/today'
+    | '/app/admin/analytics'
     | '/app/review/archive'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -162,6 +173,7 @@ export interface FileRouteTypes {
     | '/app/diagnostic'
     | '/app/review'
     | '/app/today'
+    | '/app/admin/analytics'
     | '/app/review/archive'
   id:
     | '__root__'
@@ -177,6 +189,7 @@ export interface FileRouteTypes {
     | '/_authenticated/app/diagnostic'
     | '/_authenticated/app/review'
     | '/_authenticated/app/today'
+    | '/_authenticated/app/admin/analytics'
     | '/_authenticated/app/review/archive'
   fileRoutesById: FileRoutesById
 }
@@ -282,6 +295,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppReviewArchiveRouteImport
       parentRoute: typeof AuthenticatedAppReviewRoute
     }
+    '/_authenticated/app/admin/analytics': {
+      id: '/_authenticated/app/admin/analytics'
+      path: '/admin/analytics'
+      fullPath: '/app/admin/analytics'
+      preLoaderRoute: typeof AuthenticatedAppAdminAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
   }
 }
 
@@ -304,6 +324,7 @@ interface AuthenticatedAppRouteChildren {
   AuthenticatedAppDiagnosticRoute: typeof AuthenticatedAppDiagnosticRoute
   AuthenticatedAppReviewRoute: typeof AuthenticatedAppReviewRouteWithChildren
   AuthenticatedAppTodayRoute: typeof AuthenticatedAppTodayRoute
+  AuthenticatedAppAdminAnalyticsRoute: typeof AuthenticatedAppAdminAnalyticsRoute
 }
 
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
@@ -311,6 +332,7 @@ const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
   AuthenticatedAppDiagnosticRoute: AuthenticatedAppDiagnosticRoute,
   AuthenticatedAppReviewRoute: AuthenticatedAppReviewRouteWithChildren,
   AuthenticatedAppTodayRoute: AuthenticatedAppTodayRoute,
+  AuthenticatedAppAdminAnalyticsRoute: AuthenticatedAppAdminAnalyticsRoute,
 }
 
 const AuthenticatedAppRouteWithChildren =

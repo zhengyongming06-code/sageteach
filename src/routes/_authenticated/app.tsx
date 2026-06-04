@@ -1,9 +1,11 @@
 import { createFileRoute, Outlet, Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { Calendar, MessageCircle, LogOut } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Calendar, MessageCircle, LogOut, BarChart3 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { recordAnalyticsActivity, checkAnalyticsAdmin, analyticsQueryKeys } from "@/lib/analytics/api";
 
 export const Route = createFileRoute("/_authenticated/app")({
   component: AppShell,
@@ -20,6 +22,18 @@ function AppShell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const isReviewChat =
     path.startsWith("/app/review") && !path.includes("/archive");
+
+  const { data: isAdmin } = useQuery({
+    queryKey: analyticsQueryKeys.admin,
+    queryFn: checkAnalyticsAdmin,
+    enabled: !!user?.id,
+    staleTime: 120_000,
+  });
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void recordAnalyticsActivity();
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) return;
@@ -69,6 +83,18 @@ function AppShell() {
               </Link>
             );
           })}
+          {isAdmin ? (
+            <Link
+              to="/app/admin/analytics"
+              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                path.startsWith("/app/admin")
+                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+              }`}
+            >
+              <BarChart3 className="h-4 w-4 opacity-90" /> 分析
+            </Link>
+          ) : null}
         </nav>
         <div className="mt-auto">
           <button

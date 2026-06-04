@@ -1,13 +1,16 @@
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
-import { PHOTO_ANALYSIS_LOADING } from "@/lib/question-photo-analysis";
-import { splitPhotoAnalysisContent } from "@/lib/photo-quiz-parse";
+import { PHOTO_ANALYSIS_LOADING, hasHiddenQuizKeys } from "@/lib/question-photo-analysis";
+import { splitPhotoAnalysisContent, PHOTO_QUIZ_REVEAL_EVENT } from "@/lib/photo-quiz-parse";
 import { PhotoQuizCard } from "@/components/photo-quiz-card";
 import "katex/dist/katex.min.css";
+
+/** 与 render-math.ts 一致：公式内混中文时不刷控制台警告，渲染结果不变。 */
+const REHYPE_KATEX_PLUGINS = [[rehypeKatex, { strict: "ignore" as const }]] as const;
 
 const photoMarkdownComponents: Components = {
   pre({ children }) {
@@ -92,7 +95,7 @@ function PhotoMarkdownBlock({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkMath]}
-      rehypePlugins={[rehypeKatex]}
+      rehypePlugins={[...REHYPE_KATEX_PLUGINS]}
       components={photoMarkdownComponents}
     >
       {content}
@@ -108,7 +111,20 @@ type PhotoAnalysisMarkdownProps = {
 
 export function PhotoAnalysisMarkdown({ markdown, loading = false, className }: PhotoAnalysisMarkdownProps) {
   const segments = useMemo(() => splitPhotoAnalysisContent(markdown), [markdown]);
+  const hasDeferredAnswers = useMemo(() => hasHiddenQuizKeys(markdown), [markdown]);
+  const [answersRevealed, setAnswersRevealed] = useState(() => !hasHiddenQuizKeys(markdown));
   let quizIndex = 0;
+
+  useEffect(() => {
+    setAnswersRevealed(!hasHiddenQuizKeys(markdown));
+  }, [markdown]);
+
+  useEffect(() => {
+    if (!hasDeferredAnswers) return;
+    const onReveal = () => setAnswersRevealed(true);
+    window.addEventListener(PHOTO_QUIZ_REVEAL_EVENT, onReveal);
+    return () => window.removeEventListener(PHOTO_QUIZ_REVEAL_EVENT, onReveal);
+  }, [hasDeferredAnswers]);
 
   const showLoadingOnly = loading && !markdown.trim();
 
@@ -140,7 +156,14 @@ export function PhotoAnalysisMarkdown({ markdown, loading = false, className }: 
           }
           const idx = quizIndex;
           quizIndex += 1;
-          return <PhotoQuizCard key={`quiz-${i}-${idx}`} quiz={seg.quiz} index={idx} />;
+          return (
+            <PhotoQuizCard
+              key={`quiz-${i}-${idx}`}
+              quiz={seg.quiz}
+              index={idx}
+              answersRevealed={answersRevealed}
+            />
+          );
         })}
       </div>
 
