@@ -9,7 +9,7 @@ import { filterCoachMessagesForSession } from "@/lib/review-session-messages";
 import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
 import { invokeDeepSeekChat, isRetryableNetworkFailure } from "@/lib/deepseek-supabase";
 import { recordProductAnalyticsEvent } from "@/lib/analytics/api";
-import { SageChatPanel, type SageChatMessage } from "@/components/sage-chat-panel";
+import { SageChatPanel, type SageChatMessage, type SageChatPanelHandle } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
   revokePendingChatImage,
@@ -247,7 +247,7 @@ function Review() {
   const [subject, setSubject] = useState<string>(SUBJECTS[0]);
   const [selectedDate, setSelectedDate] = useState(() => localYmd());
   const [sidebarSessionFilter, setSidebarSessionFilter] = useState<SidebarSessionFilter>("全部");
-  const [draft, setDraft] = useState("");
+  const chatPanelRef = useRef<SageChatPanelHandle>(null);
   const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
   const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
   const [photoAnalysisLoading, setPhotoAnalysisLoading] = useState(false);
@@ -382,7 +382,7 @@ function Review() {
     sendAbortRef.current?.abort();
     sendAbortRef.current = null;
     setStreamAssistantText(null);
-    setDraft("");
+    chatPanelRef.current?.clearInput();
     setPendingImage((prev) => {
       revokePendingChatImage(prev);
       return null;
@@ -413,7 +413,7 @@ function Review() {
       setIsSummarySubmitting(false);
       setIsEndingReview(false);
       setStreamAssistantText(null);
-      setDraft("");
+      chatPanelRef.current?.clearInput();
       setPendingImage((prev) => {
         revokePendingChatImage(prev);
         return null;
@@ -1135,14 +1135,13 @@ function Review() {
     pinSummaryCardScope,
   ]);
 
-  const send = useCallback(async () => {
+  const send = useCallback(async (draftText: string) => {
     const imageSnapshot = pendingImage;
-    const text = draft.trim();
+    const text = draftText.trim();
     const userText = text || (imageSnapshot ? "请帮我分析这道题目" : "");
     if (!userText || !user?.id || isSending) return;
 
     if (!imageSnapshot && isPhotoQuizRevealRequest(userText)) {
-      setDraft("");
       toast.message("请直接在巩固题上点击选项，系统会自动判分并显示解析。");
       return;
     }
@@ -1188,7 +1187,7 @@ function Review() {
           toast.error(
             compressErr instanceof Error ? compressErr.message : "图片处理失败",
           );
-          if (text) setDraft(text);
+          if (text) chatPanelRef.current?.setInputValue(text);
           return;
         }
         handleClearImage();
@@ -1210,7 +1209,7 @@ function Review() {
         .single();
       if (uErr) throw uErr;
 
-      setDraft("");
+      chatPanelRef.current?.clearInput();
       clearedDraft = true;
 
       if (scopeStale()) return;
@@ -1253,7 +1252,7 @@ function Review() {
           toast.error(
             photoErr instanceof Error ? photoErr.message : "题目识别失败",
           );
-          if (text) setDraft(text);
+          if (text) chatPanelRef.current?.setInputValue(text);
           return;
         }
 
@@ -1380,7 +1379,7 @@ function Review() {
               ? streamErr.message
               : "发送失败",
         );
-        if (text) setDraft(text);
+        if (text) chatPanelRef.current?.setInputValue(text);
         return;
       } finally {
         setChatRetrying(false);
@@ -1421,7 +1420,7 @@ function Review() {
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (scopeStale()) return;
-      if (clearedDraft && text) setDraft(text);
+      if (clearedDraft && text) chatPanelRef.current?.setInputValue(text);
       const msg = e instanceof Error ? e.message : "发送失败";
       toast.error(msg);
     } finally {
@@ -1433,7 +1432,6 @@ function Review() {
       slugNavSourceRef.current = "control";
     }
   }, [
-    draft,
     pendingImage,
     user?.id,
     isSending,
@@ -1630,12 +1628,11 @@ function Review() {
 
   const renderChatPanel = (layout: "default" | "mobile") => (
     <SageChatPanel
+      ref={chatPanelRef}
       key={chatSubject}
       layout={layout}
       messages={messages}
-      draft={draft}
-      onDraftChange={setDraft}
-      onSubmit={() => void send()}
+      onSubmit={(text) => void send(text)}
       isSending={isSending}
       emptyTitle={onboardingIncomplete ? "从这里开始" : "从这里开始复盘"}
       emptyHint={

@@ -1,228 +1,100 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { Button } from "@/components/ui/button";
-import ReactMarkdown from "react-markdown";
 import { isReviewWrapUpMessage } from "@/lib/review-opening";
-import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
-import {
-  ChatImageAttachButton,
-  ChatImagePreview,
-  type PendingChatImage,
-} from "@/components/chat-image-picker";
-import { PhotoAnalysisMarkdown } from "@/components/photo-analysis-markdown";
-import { unwrapPhotoMarkdown } from "@/lib/question-photo-analysis";
-import {
-  isPhotoOnlyMessageContent,
-  PHOTO_UPLOADED_LABEL,
-} from "@/lib/review-photo-messages";
-
-/** Block javascript:/data: and other non-http(s) schemes in assistant Markdown. */
-function markdownUrlTransform(url: string): string {
-  const s = url.trim();
-  if (!s) return "";
-  const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(s);
-  if (schemeMatch) {
-    const scheme = schemeMatch[1].toLowerCase();
-    if (scheme === "http" || scheme === "https") return s;
-    return "";
-  }
-  if (s.startsWith("//")) return "";
-  return s;
-}
-
-const markdownComponents: Components = {
-  a({ node: _n, children, href, ...rest }) {
-    if (!href) {
-      return <span className="underline decoration-primary/40">{children}</span>;
-    }
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
-        {children}
-      </a>
-    );
-  },
-};
+import type { PendingChatImage } from "@/components/chat-image-picker";
+import { SageChatComposer, type SageChatComposerHandle } from "@/components/sage-chat-composer";
+import { SageChatMessageList } from "@/components/sage-chat-message-list";
+import { isPhotoOnlyMessageContent } from "@/lib/review-photo-messages";
 
 export type SageChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  /** Ephemeral preview URL while sending (not persisted). */
   imageUrl?: string;
-  /** Persisted image-only user message — show placeholder, not base64. */
   photoUploaded?: boolean;
-  /** Set by parent for one frame after send; panel also detects sends internally. */
   isNew?: boolean;
 };
 
+export type SageChatPanelHandle = SageChatComposerHandle;
+
 type SageChatPanelProps = {
   messages: SageChatMessage[];
-  draft: string;
-  onDraftChange: (v: string) => void;
-  onSubmit: () => void;
+  onSubmit: (text: string) => void;
   isSending: boolean;
   emptyTitle: string;
   emptyHint: string;
   placeholder?: string;
   className?: string;
   style?: CSSProperties;
-  /** Fill parent flex column (scroll area grows, min-h-0). */
   expand?: boolean;
-  /** Mobile chat-first bubble and composer styling. */
   layout?: "default" | "mobile";
-  /** Rendered between the message list and the composer (e.g. actions). */
   betweenScrollAndInput?: ReactNode;
-  /** Rendered after the composer (e.g. summary cards). */
   belowForm?: ReactNode;
-  /** Loading past session messages: gray bubbles instead of an empty placeholder. */
   showHistorySkeleton?: boolean;
-  /** Partial assistant reply while streaming from the model; trailing ▋ is rendered in the panel. */
   streamingAssistantText?: string | null;
-  /** Subtle status under the composer (e.g. retry hint). */
   composerHint?: string | null;
-  /** Last assistant message signals session wrap-up; parent can prefetch summary. */
   onWrapUpDetected?: () => void;
-  /** Optional photo-of-question flow (Review page). */
   pendingImage?: PendingChatImage | null;
   onImageSelected?: (image: PendingChatImage) => void;
   onClearImage?: () => void;
-  /** Assistant bubble shows photo-analysis skeleton while waiting for VL model. */
   photoAnalysisLoading?: boolean;
-  /** Streaming markdown while VL model responds. */
   streamingPhotoMarkdown?: string | null;
 };
 
-function SendArrowIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M8 14V2M8 2L3 7M8 2L13 7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+const NEAR_BOTTOM_PX = 100;
 
-function AssistantBubbleContent({
-  content,
-  streaming,
-}: {
-  content: string;
-  streaming?: boolean;
-}) {
-  return (
-    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
-      {content !== "" ? (
-        <ReactMarkdown urlTransform={markdownUrlTransform} components={markdownComponents}>
-          {content}
-        </ReactMarkdown>
-      ) : null}
-      {streaming ? (
-        <span
-          className="ml-0.5 inline-block animate-[sage-cursor_1s_steps(2)_infinite] select-none font-mono text-primary"
-          aria-hidden
-        >
-          ▋
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function AssistantPhotoCardShell({
-  children,
-  isMobile,
-}: {
-  children: ReactNode;
-  isMobile: boolean;
-}) {
-  if (isMobile) {
-    return (
-      <div className="flex max-w-[94%] flex-col items-start gap-1">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
-          Sage
-        </div>
-        <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-white px-4 py-4 shadow-sm">
-          {children}
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="max-w-[min(100%,32rem)] min-w-0 rounded-2xl border border-border/80 bg-white px-4 py-4 shadow-sm">
-      {children}
-    </div>
-  );
-}
-
-function UserBubbleContent({ msg }: { msg: SageChatMessage }) {
-  const isPhotoPlaceholder =
-    msg.photoUploaded === true || isPhotoOnlyMessageContent(msg.content);
-  const showPreview = Boolean(msg.imageUrl) && !isPhotoPlaceholder;
-  const showText =
-    msg.content.trim().length > 0 && !isPhotoOnlyMessageContent(msg.content);
-
-  return (
-    <div className="flex flex-col gap-2">
-      {showPreview ? (
-        <img
-          src={msg.imageUrl}
-          alt="题目图片"
-          className="max-h-40 max-w-full rounded-lg object-contain"
-        />
-      ) : null}
-      {isPhotoPlaceholder ? (
-        <div
-          className={cn(
-            "flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm",
-            "border-white/30 bg-white/10 text-white/90",
-          )}
-        >
-          <span>{PHOTO_UPLOADED_LABEL}</span>
-        </div>
-      ) : null}
-      {showText ? <p className="whitespace-pre-wrap">{msg.content}</p> : null}
-    </div>
-  );
-}
-
-export function SageChatPanel({
-  messages,
-  draft,
-  onDraftChange,
-  onSubmit,
-  isSending,
-  emptyTitle,
-  emptyHint,
-  placeholder = "输入消息…",
-  className = "",
-  style,
-  expand = false,
-  layout = "default",
-  betweenScrollAndInput,
-  belowForm,
-  showHistorySkeleton = false,
-  streamingAssistantText = null,
-  composerHint = null,
-  onWrapUpDetected,
-  pendingImage = null,
-  onImageSelected,
-  onClearImage,
-  photoAnalysisLoading = false,
-  streamingPhotoMarkdown = null,
-}: SageChatPanelProps) {
+export const SageChatPanel = forwardRef(function SageChatPanel(
+  {
+    messages,
+    onSubmit,
+    isSending,
+    emptyTitle,
+    emptyHint,
+    placeholder = "输入消息…",
+    className = "",
+    style,
+    expand = false,
+    layout = "default",
+    betweenScrollAndInput,
+    belowForm,
+    showHistorySkeleton = false,
+    streamingAssistantText = null,
+    composerHint = null,
+    onWrapUpDetected,
+    pendingImage = null,
+    onImageSelected,
+    onClearImage,
+    photoAnalysisLoading = false,
+    streamingPhotoMarkdown = null,
+  }: SageChatPanelProps,
+  ref: Ref<SageChatPanelHandle>,
+) {
   const isMobile = layout === "mobile";
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<SageChatComposerHandle>(null);
   const newBubbleRef = useRef<HTMLDivElement | null>(null);
   const knownMessageIdsRef = useRef<Set<string>>(new Set());
   const wrapUpTriggeredIdsRef = useRef<Set<string>>(new Set());
   const [flyingUserMessageId, setFlyingUserMessageId] = useState<string | null>(null);
   const [pendingUserMessage, setPendingUserMessage] = useState<SageChatMessage | null>(null);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    setInputValue: (value: string) => composerRef.current?.setInputValue(value),
+    clearInput: () => composerRef.current?.clearInput(),
+  }));
 
   const displayMessages = useMemo(() => {
     if (!pendingUserMessage) return messages;
@@ -242,6 +114,23 @@ export function SageChatPanel({
     !isSending &&
     !showHistorySkeleton &&
     streamingAssistantText == null;
+
+  const isNearBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+  }, []);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    setShowJumpToLatest(false);
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    setShowJumpToLatest(!isNearBottom());
+  }, [isNearBottom]);
 
   useEffect(() => {
     if (!pendingUserMessage) return;
@@ -289,18 +178,28 @@ export function SageChatPanel({
         newBubbleRef.current ??
         scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${id}"]`);
       target?.scrollIntoView({ behavior: "smooth", block: "end" });
+      setShowJumpToLatest(false);
     });
     return () => cancelAnimationFrame(raf);
   }, [flyingUserMessageId]);
 
   useEffect(() => {
     if (flyingUserMessageId) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    requestAnimationFrame(() => {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    });
-  }, [displayMessages, isSending, streamingAssistantText, streamingPhotoMarkdown, flyingUserMessageId]);
+    if (isNearBottom()) {
+      requestAnimationFrame(() => scrollToBottom("auto"));
+      setShowJumpToLatest(false);
+    } else {
+      setShowJumpToLatest(true);
+    }
+  }, [
+    displayMessages,
+    isSending,
+    streamingAssistantText,
+    streamingPhotoMarkdown,
+    flyingUserMessageId,
+    isNearBottom,
+    scrollToBottom,
+  ]);
 
   useEffect(() => {
     if (!onWrapUpDetected || isSending || streamingAssistantText != null) return;
@@ -311,166 +210,80 @@ export function SageChatPanel({
     onWrapUpDetected();
   }, [displayMessages, isSending, streamingAssistantText, onWrapUpDetected]);
 
-  const canSubmit = Boolean(draft.trim() || pendingImage) && !isSending;
-  const imagePickerEnabled = Boolean(onImageSelected && onClearImage);
-
-  const handleSubmit = useCallback(() => {
-    const text = draft.trim();
-    const displayText = text || (pendingImage ? "请帮我分析这道题目" : "");
-    if (!displayText || isSending) return;
-
-    const optimisticId = `__optimistic_${Date.now()}`;
-    setPendingUserMessage({
-      id: optimisticId,
-      role: "user",
-      content: text,
-      imageUrl: pendingImage?.previewUrl,
-      isNew: true,
-    });
-    setFlyingUserMessageId(optimisticId);
-    window.setTimeout(() => setFlyingUserMessageId(null), 150);
-    onDraftChange("");
-    onSubmit();
-  }, [draft, isSending, onDraftChange, onSubmit, pendingImage]);
-
-  const renderAssistantPhotoBubble = (markdown: string, loading: boolean, key?: string) => (
-    <div key={key} className="flex justify-start">
-      <AssistantPhotoCardShell isMobile={isMobile}>
-        <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
-      </AssistantPhotoCardShell>
-    </div>
+  const handleOptimisticSend = useCallback(
+    ({ text, previewUrl }: { text: string; previewUrl?: string }) => {
+      const optimisticId = `__optimistic_${Date.now()}`;
+      setPendingUserMessage({
+        id: optimisticId,
+        role: "user",
+        content: text,
+        imageUrl: previewUrl,
+        isNew: true,
+      });
+      setFlyingUserMessageId(optimisticId);
+      window.setTimeout(() => setFlyingUserMessageId(null), 150);
+    },
+    [],
   );
-
-  const renderAssistantBubble = (content: string, streaming = false, key?: string) => (
-    <div key={key} className="flex justify-start">
-      {isMobile ? (
-        <div className="flex max-w-[88%] flex-col items-start gap-1">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
-            Sage
-          </div>
-          <div className="rounded-[4px_16px_16px_16px] border border-border bg-white px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
-            <AssistantBubbleContent content={content} streaming={streaming} />
-          </div>
-        </div>
-      ) : (
-        <div className="max-w-[88%] rounded-2xl border border-border bg-background px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
-          <AssistantBubbleContent content={content} streaming={streaming} />
-        </div>
-      )}
-    </div>
-  );
-
-  const renderAssistantMessage = (msg: SageChatMessage) => {
-    const { isPhotoAnalysis, markdown } = unwrapPhotoMarkdown(msg.content);
-    if (isPhotoAnalysis) {
-      return renderAssistantPhotoBubble(markdown, false, msg.id);
-    }
-    return renderAssistantBubble(msg.content, false, msg.id);
-  };
 
   return (
     <div
-      className={cn(
-        "flex min-h-0 flex-1 flex-col",
-        expand && "h-full min-h-0",
-        className,
-      )}
+      className={cn("flex min-h-0 flex-1 flex-col", expand && "h-full min-h-0", className)}
       style={style}
     >
-      <div
-        ref={scrollRef}
-        className={cn(
-          isMobile
-            ? "min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
-            : expand
-              ? "min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4"
-              : "min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]",
-        )}
-      >
-        {empty && (
-          <div
-            className={cn(
-              "grid flex-1 place-items-center px-4 text-center",
-              expand || isMobile ? "min-h-0" : "h-full min-h-[180px]",
-            )}
-          >
-            <div>
-              <p className={cn("text-foreground", isMobile ? "text-sm" : "text-[15px]")}>
-                {emptyTitle}
-              </p>
-              <p className={cn("mt-2 text-muted-foreground", isMobile ? "text-xs" : "text-sm")}>
-                {emptyHint}
-              </p>
-            </div>
-          </div>
-        )}
-        {showHistorySkeleton && messages.length === 0 && !isSending && (
-          <div className="space-y-3">
-            {(["w-56", "w-44", "w-64", "w-40"] as const).map((w, i) => (
-              <div
-                key={i}
-                className={`flex ${i % 2 === 0 ? "justify-start" : "justify-end"}`}
-              >
-                <div
-                  className={cn(
-                    "h-11 max-w-[88%] animate-pulse bg-muted/70",
-                    isMobile ? "rounded-[4px_16px_16px_16px]" : "rounded-2xl",
-                    w,
-                  )}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-        {displayMessages.map((msg) => {
-          const isFlyingUser =
-            msg.role === "user" && (msg.isNew === true || msg.id === flyingUserMessageId);
-          const isUser = msg.role === "user";
-          return (
-            <div
-              key={msg.id}
-              data-message-id={msg.id}
-              ref={isFlyingUser ? newBubbleRef : undefined}
-              className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className={cn(
+            isMobile
+              ? "h-full min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
+              : expand
+                ? "h-full min-h-0 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4"
+                : "min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]",
+          )}
+        >
+          <SageChatMessageList
+            displayMessages={displayMessages}
+            isMobile={isMobile}
+            expand={expand}
+            empty={empty}
+            emptyTitle={emptyTitle}
+            emptyHint={emptyHint}
+            showHistorySkeleton={showHistorySkeleton}
+            messagesLength={messages.length}
+            isSending={isSending}
+            streamingAssistantText={streamingAssistantText}
+            streamingPhotoMarkdown={streamingPhotoMarkdown}
+            photoAnalysisLoading={photoAnalysisLoading}
+            flyingUserMessageId={flyingUserMessageId}
+            newBubbleRef={newBubbleRef}
+          />
+        </div>
+
+        {showJumpToLatest ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="pointer-events-auto h-8 rounded-full border border-border bg-background/95 px-3 text-xs shadow-md backdrop-blur-sm"
+              onClick={() => scrollToBottom("smooth")}
             >
-              {isUser ? (
-                <div
-                  className={cn(
-                    "max-w-[88%] px-4 py-2.5 text-[15px] leading-relaxed",
-                    isMobile
-                      ? "rounded-[16px_4px_16px_16px] bg-[#1a1a2e] text-white"
-                      : "rounded-2xl bg-primary text-primary-foreground",
-                    isFlyingUser && "message-new",
-                  )}
-                >
-                  <UserBubbleContent msg={msg} />
-                </div>
-              ) : (
-                renderAssistantMessage(msg)
-              )}
-            </div>
-          );
-        })}
-        {photoAnalysisLoading || streamingPhotoMarkdown != null
-          ? renderAssistantPhotoBubble(
-              streamingPhotoMarkdown ?? "",
-              photoAnalysisLoading,
-              "__photo_streaming__",
-            )
-          : null}
-        {!photoAnalysisLoading &&
-        streamingPhotoMarkdown == null &&
-        (streamingAssistantText != null || isSending)
-          ? renderAssistantBubble(streamingAssistantText ?? "", true, "__streaming__")
-          : null}
+              ↓ 跳到最新
+            </Button>
+          </div>
+        ) : null}
       </div>
 
-      <div className={cn("shrink-0", !isMobile && expand && "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm")}>
+      <div
+        className={cn(
+          "shrink-0",
+          !isMobile && expand && "sticky bottom-0 z-10 border-t border-border bg-background/95 backdrop-blur-sm",
+        )}
+      >
         {betweenScrollAndInput ? (
-          <div className={cn("mt-3 shrink-0", isMobile && "px-4")}>
-            {betweenScrollAndInput}
-          </div>
+          <div className={cn("mt-3 shrink-0", isMobile && "px-4")}>{betweenScrollAndInput}</div>
         ) : null}
 
         {composerHint ? (
@@ -479,97 +292,22 @@ export function SageChatPanel({
           </p>
         ) : null}
 
-        {pendingImage && onClearImage ? (
-          <ChatImagePreview
-            image={pendingImage}
-            onClear={onClearImage}
-            disabled={isSending}
-            className={isMobile ? undefined : "px-0"}
-          />
+        <SageChatComposer
+          ref={composerRef}
+          onSubmit={onSubmit}
+          isSending={isSending}
+          placeholder={placeholder}
+          isMobile={isMobile}
+          pendingImage={pendingImage}
+          onImageSelected={onImageSelected}
+          onClearImage={onClearImage}
+          onOptimisticSend={handleOptimisticSend}
+        />
+
+        {belowForm ? (
+          <div className={cn("mt-2 shrink-0", isMobile && "px-4 pb-3")}>{belowForm}</div>
         ) : null}
-
-        {isMobile ? (
-          <form
-            className="flex h-[52px] shrink-0 items-center gap-1 px-4 py-[10px]"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmit();
-            }}
-          >
-            {imagePickerEnabled ? (
-              <ChatImageAttachButton
-                onImageSelected={onImageSelected!}
-                disabled={isSending}
-                className="h-9 w-9 shrink-0"
-              />
-            ) : null}
-            <div className="relative flex min-w-0 flex-1 items-center">
-              <Textarea
-                value={draft}
-                onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleSubmit();
-                  }
-                }}
-                placeholder={placeholder}
-                rows={1}
-                className={cn(
-                  "min-h-0 h-9 w-full resize-none rounded-[24px] border border-border bg-white py-2 pr-12 text-base leading-5",
-                  imagePickerEnabled ? "pl-3" : "pl-4",
-                )}
-              />
-              <Button
-                type="submit"
-                disabled={!canSubmit}
-                size="icon"
-                className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full bg-[#1a1a2e] text-white hover:bg-[#1a1a2e]/90"
-              >
-                <SendArrowIcon />
-              </Button>
-            </div>
-          </form>
-        ) : (
-          <form
-            className="safe-bottom flex shrink-0 items-end gap-2 pb-1 pt-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmit();
-            }}
-          >
-            {imagePickerEnabled ? (
-              <ChatImageAttachButton
-                onImageSelected={onImageSelected!}
-                disabled={isSending}
-                className="h-12 w-12 shrink-0"
-              />
-            ) : null}
-            <Textarea
-              value={draft}
-              onChange={(e) => onDraftChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  handleSubmit();
-                }
-              }}
-              placeholder={placeholder}
-              className="min-h-12 flex-1 resize-none rounded-xl border-border bg-card"
-            />
-            <Button
-              type="submit"
-              disabled={!canSubmit}
-              size="icon"
-              className="h-12 w-12 shrink-0 rounded-xl"
-            >
-              <SendArrowIcon />
-            </Button>
-          </form>
-        )}
-
-        {belowForm ? <div className={cn("mt-4 shrink-0", isMobile && "px-4 pb-4")}>{belowForm}</div> : null}
       </div>
     </div>
   );
-}
+});

@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import {
   analyticsQueryKeys,
-  checkAnalyticsAdmin,
   fetchProductAnalyticsDashboard,
 } from "@/lib/analytics/api";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 import type { AnalyticsFunnelStep, AnalyticsRankedItem } from "@/lib/analytics/types";
 import {
   ChartContainer,
@@ -39,11 +39,7 @@ const dauChartConfig = {
 function AdminAnalyticsPage() {
   const [days, setDays] = useState(30);
 
-  const { data: isAdmin, isLoading: adminLoading } = useQuery({
-    queryKey: analyticsQueryKeys.admin,
-    queryFn: checkAnalyticsAdmin,
-    staleTime: 60_000,
-  });
+  const { isAdmin, isLoading: adminLoading } = useIsAdmin();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: analyticsQueryKeys.dashboard(days),

@@ -1,11 +1,11 @@
 import { createFileRoute, Outlet, Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Calendar, MessageCircle, LogOut, BarChart3 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import { recordAnalyticsActivity, checkAnalyticsAdmin, analyticsQueryKeys } from "@/lib/analytics/api";
+import { recordAnalyticsActivity } from "@/lib/analytics/api";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 export const Route = createFileRoute("/_authenticated/app")({
   component: AppShell,
@@ -23,12 +23,7 @@ function AppShell() {
   const isReviewChat =
     path.startsWith("/app/review") && !path.includes("/archive");
 
-  const { data: isAdmin } = useQuery({
-    queryKey: analyticsQueryKeys.admin,
-    queryFn: checkAnalyticsAdmin,
-    enabled: !!user?.id,
-    staleTime: 120_000,
-  });
+  const { isAdmin } = useIsAdmin();
 
   useEffect(() => {
     if (!user?.id) return;
@@ -124,7 +119,7 @@ function AppShell() {
 
       {!isReviewChat ? (
         <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden">
-          <div className="mx-auto grid max-w-lg grid-cols-2">
+          <div className={cn("mx-auto grid max-w-lg", isAdmin ? "grid-cols-3" : "grid-cols-2")}>
             {tabs.map((t) => {
               const active = path.startsWith(t.to);
               const className = `flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
@@ -137,6 +132,19 @@ function AppShell() {
                 </Link>
               );
             })}
+            {isAdmin ? (
+              <Link
+                to="/app/admin/analytics"
+                className={`flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
+                  path.startsWith("/app/admin")
+                    ? "font-medium text-primary"
+                    : "text-muted-foreground"
+                }`}
+              >
+                <BarChart3 className="h-5 w-5" />
+                分析
+              </Link>
+            ) : null}
           </div>
         </nav>
       ) : null}
