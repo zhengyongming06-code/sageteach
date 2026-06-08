@@ -9,6 +9,8 @@ import {
   type CSSProperties,
   type ReactNode,
   type Ref,
+  type TouchEvent,
+  type WheelEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { isReviewWrapUpMessage } from "@/lib/review-opening";
@@ -90,6 +92,9 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
   const [flyingUserMessageId, setFlyingUserMessageId] = useState<string | null>(null);
   const [pendingUserMessage, setPendingUserMessage] = useState<SageChatMessage | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  /** User intent: only auto-scroll while true (scroll/touch-up disables immediately). */
+  const stickToBottomRef = useRef(true);
+  const touchStartYRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     setInputValue: (value: string) => composerRef.current?.setInputValue(value),
@@ -128,9 +133,38 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
     setShowJumpToLatest(false);
   }, []);
 
+  const disableAutoScroll = useCallback(() => {
+    stickToBottomRef.current = false;
+    setShowJumpToLatest(true);
+  }, []);
+
   const handleScroll = useCallback(() => {
-    setShowJumpToLatest(!isNearBottom());
+    const nearBottom = isNearBottom();
+    stickToBottomRef.current = nearBottom;
+    setShowJumpToLatest(!nearBottom);
   }, [isNearBottom]);
+
+  const handleTouchStart = useCallback((e: TouchEvent<HTMLDivElement>) => {
+    touchStartYRef.current = e.touches[0]?.clientY ?? 0;
+  }, []);
+
+  const handleTouchMove = useCallback(
+    (e: TouchEvent<HTMLDivElement>) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      // Finger moves down → user scrolls up to read earlier messages.
+      if (y - touchStartYRef.current > 6) {
+        disableAutoScroll();
+      }
+    },
+    [disableAutoScroll],
+  );
+
+  const handleWheel = useCallback(
+    (e: WheelEvent<HTMLDivElement>) => {
+      if (e.deltaY < 0) disableAutoScroll();
+    },
+    [disableAutoScroll],
+  );
 
   useEffect(() => {
     if (!pendingUserMessage) return;
@@ -172,6 +206,7 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
 
   useEffect(() => {
     if (!flyingUserMessageId) return;
+    if (!stickToBottomRef.current) return;
     const id = flyingUserMessageId;
     const raf = requestAnimationFrame(() => {
       const target =
@@ -185,19 +220,20 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
 
   useEffect(() => {
     if (flyingUserMessageId) return;
-    if (isNearBottom()) {
-      requestAnimationFrame(() => scrollToBottom("auto"));
-      setShowJumpToLatest(false);
-    } else {
-      setShowJumpToLatest(true);
+    if (!stickToBottomRef.current) {
+      const streaming =
+        isSending || streamingAssistantText != null || streamingPhotoMarkdown != null;
+      if (streaming) setShowJumpToLatest(true);
+      return;
     }
+    requestAnimationFrame(() => scrollToBottom("auto"));
+    setShowJumpToLatest(false);
   }, [
     displayMessages,
     isSending,
     streamingAssistantText,
     streamingPhotoMarkdown,
     flyingUserMessageId,
-    isNearBottom,
     scrollToBottom,
   ]);
 
@@ -212,6 +248,7 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
 
   const handleOptimisticSend = useCallback(
     ({ text, previewUrl }: { text: string; previewUrl?: string }) => {
+      stickToBottomRef.current = true;
       const optimisticId = `__optimistic_${Date.now()}`;
       setPendingUserMessage({
         id: optimisticId,
@@ -235,6 +272,9 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
         <div
           ref={scrollRef}
           onScroll={handleScroll}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onWheel={handleWheel}
           className={cn(
             isMobile
               ? "h-full min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
@@ -268,7 +308,10 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
               size="sm"
               variant="secondary"
               className="pointer-events-auto h-8 rounded-full border border-border bg-background/95 px-3 text-xs shadow-md backdrop-blur-sm"
-              onClick={() => scrollToBottom("smooth")}
+              onClick={() => {
+                stickToBottomRef.current = true;
+                scrollToBottom("smooth");
+              }}
             >
               ↓ 跳到最新
             </Button>
