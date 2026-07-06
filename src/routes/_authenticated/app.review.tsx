@@ -7,7 +7,7 @@ import { SUBJECTS, type Subject } from "@/lib/subjects";
 import { buildReviewDeepSeekSystemPrompt } from "@/lib/sage-system-prompt";
 import { filterCoachMessagesForSession } from "@/lib/review-session-messages";
 import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
-import { invokeDeepSeekChat, isRetryableNetworkFailure } from "@/lib/deepseek-supabase";
+import { invokeDeepSeekChat, getDeepSeekUserMessage, isRetryableNetworkFailure } from "@/lib/deepseek-supabase";
 import { recordProductAnalyticsEvent } from "@/lib/analytics/api";
 import { SageChatPanel, type SageChatMessage, type SageChatPanelHandle } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
@@ -1375,9 +1375,7 @@ function Review() {
         toast.error(
           net
             ? "网络不稳定，请再发一次"
-            : streamErr instanceof Error
-              ? streamErr.message
-              : "发送失败",
+            : getDeepSeekUserMessage(streamErr),
         );
         if (text) chatPanelRef.current?.setInputValue(text);
         return;
@@ -1421,7 +1419,7 @@ function Review() {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (scopeStale()) return;
       if (clearedDraft && text) chatPanelRef.current?.setInputValue(text);
-      const msg = e instanceof Error ? e.message : "发送失败";
+      const msg = getDeepSeekUserMessage(e);
       toast.error(msg);
     } finally {
       setStreamAssistantText(null);

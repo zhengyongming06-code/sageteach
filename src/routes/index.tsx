@@ -68,7 +68,7 @@ function Landing() {
               to={session ? "/app/today" : "/signup"}
               className="inline-flex items-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90"
             >
-              开始今天的复盘 <ArrowRight className="h-4 w-4" />
+              注册 <ArrowRight className="h-4 w-4" />
             </Link>
             <Link to="/login" className="rounded-2xl px-4 py-3 text-sm text-muted-foreground hover:text-foreground">
               已有账号 →

@@ -3,11 +3,76 @@ import type { DeepSeekMessage } from "./deepseek-types";
 
 export type { DeepSeekMessage, DeepSeekRole } from "./deepseek-types";
 
+/** DeepSeek rejected the API key (401/403) or key missing in client bundle. */
+export class DeepSeekAuthError extends Error {
+  constructor(message = "AI服务密钥失效，请联系管理员") {
+    super(message);
+    this.name = "DeepSeekAuthError";
+  }
+}
+
+/** VITE_DEEPSEEK_API_KEY not set at build time (local .env or CI). */
+export class DeepSeekConfigError extends Error {
+  constructor(message = "AI服务未配置，请联系管理员") {
+    super(message);
+    this.name = "DeepSeekConfigError";
+  }
+}
+
 export class DeepSeekTimeoutError extends Error {
   constructor() {
     super("DeepSeek request timed out");
     this.name = "DeepSeekTimeoutError";
   }
+}
+
+export function isDeepSeekAuthError(e: unknown): boolean {
+  return e instanceof DeepSeekAuthError || e instanceof DeepSeekConfigError;
+}
+
+/** Map DeepSeek client errors to user-facing toast copy. */
+export function getDeepSeekUserMessage(e: unknown): string {
+  if (e instanceof DeepSeekAuthError || e instanceof DeepSeekConfigError) {
+    return e.message;
+  }
+  if (e instanceof Error && e.message.trim()) return e.message;
+  return "发送失败";
+}
+
+function readDeepSeekApiKey(): string {
+  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY?.trim();
+  if (!apiKey) {
+    throw new DeepSeekConfigError();
+  }
+  return apiKey;
+}
+
+let envCheckLogged = false;
+
+function logDeepSeekEnvOnce() {
+  if (envCheckLogged) return;
+  envCheckLogged = true;
+  const raw = import.meta.env.VITE_DEEPSEEK_API_KEY;
+  const trimmed = raw?.trim();
+  if (import.meta.env.DEV) {
+    console.log("[deepseek] env check", {
+      VITE_DEEPSEEK_API_KEY: trimmed
+        ? `loaded (${trimmed.length} chars)`
+        : "MISSING or empty — set in .env and restart dev server",
+    });
+  } else if (!trimmed) {
+    console.error(
+      "[deepseek] VITE_DEEPSEEK_API_KEY missing in production bundle — set at build time (e.g. Cloudflare Pages env)",
+    );
+  }
+}
+
+function throwForDeepSeekHttpError(status: number, raw: string, context: string): never {
+  logUpstreamResponse(context, status, raw);
+  if (status === 401 || status === 403) {
+    throw new DeepSeekAuthError();
+  }
+  throw new Error(`AI 服务暂时不可用（${status}）`);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -112,10 +177,7 @@ async function invokeDeepSeekDirect(
   model: DeepSeekModel,
   signal?: AbortSignal,
 ): Promise<string> {
-  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("Missing VITE_DEEPSEEK_API_KEY");
-  }
+  const apiKey = readDeepSeekApiKey();
 
   const { messages: safeMessages, max_tokens: safeMax } = assertValidDeepSeekProxyPayload({
     messages,
@@ -147,8 +209,7 @@ async function invokeDeepSeekDirect(
   }
 
   if (!res.ok) {
-    logUpstreamResponse("deepseek-direct", res.status, raw);
-    throw new Error(`AI 服务暂时不可用（${res.status}）`);
+    throwForDeepSeekHttpError(res.status, raw, "deepseek-direct");
   }
 
   const choices = (json as { choices?: Array<{ message?: { content?: string | null } }> })?.choices;
@@ -177,10 +238,7 @@ async function invokeDeepSeekDirectStream(
   onDelta: (textSoFar: string, delta: string) => void,
   signal?: AbortSignal,
 ): Promise<string> {
-  const apiKey = import.meta.env.VITE_DEEPSEEK_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("Missing VITE_DEEPSEEK_API_KEY");
-  }
+  const apiKey = readDeepSeekApiKey();
 
   const { messages: safeMessages, max_tokens: safeMax } = assertValidDeepSeekProxyPayload({
     messages,
@@ -205,8 +263,7 @@ async function invokeDeepSeekDirectStream(
 
   if (!res.ok) {
     const raw = await res.text();
-    logUpstreamResponse("deepseek-stream", res.status, raw);
-    throw new Error(`AI 服务暂时不可用（${res.status}）`);
+    throwForDeepSeekHttpError(res.status, raw, "deepseek-stream");
   }
 
   if (!res.body) {
@@ -282,6 +339,8 @@ export async function invokeDeepSeekChat(
   const maxAttempts = 3;
   const onDelta = options?.onDelta;
 
+  logDeepSeekEnvOnce();
+
   if (import.meta.env.DEV) {
     console.log("[deepseek] outgoing messages", {
       streaming: !!onDelta,
@@ -319,6 +378,7 @@ export async function invokeDeepSeekChat(
       }
       const canRetry =
         attempt < maxAttempts &&
+        !isDeepSeekAuthError(lastErr) &&
         isRetryableNetworkFailure(lastErr) &&
         (!onDelta || !receivedAnyToken);
       if (!canRetry) throw lastErr;
