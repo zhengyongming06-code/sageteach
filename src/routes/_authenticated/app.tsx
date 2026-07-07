@@ -1,19 +1,21 @@
 import { createFileRoute, Outlet, Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { Calendar, MessageCircle, LogOut, BarChart3 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { recordAnalyticsActivity } from "@/lib/analytics/api";
 import { useIsAdmin } from "@/hooks/use-is-admin";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { appCanvasClass } from "@/lib/shell-styles";
+import { WikiAppSidebar } from "@/components/wiki-app-sidebar";
 
 export const Route = createFileRoute("/_authenticated/app")({
   component: AppShell,
 });
 
 const tabs = [
-  { to: "/app/today", label: "Today", icon: Calendar },
-  { to: "/app/review", label: "Review", icon: MessageCircle },
+  { to: "/app/today", label: "今日" },
+  { to: "/app/review", label: "复盘" },
 ] as const;
 
 function AppShell() {
@@ -53,64 +55,27 @@ function AppShell() {
   return (
     <div
       className={cn(
-        "flex min-h-screen flex-col bg-background text-foreground",
+        appCanvasClass,
+        "flex min-h-screen",
         isReviewChat && "h-screen max-h-screen overflow-hidden",
       )}
     >
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground md:flex">
-        <Link to="/app/today" className="mb-8 flex items-center gap-2.5 px-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
-            S
-          </span>
-          <span className="text-lg font-semibold tracking-tight text-sidebar-foreground">Sage</span>
-        </Link>
-        <nav className="flex flex-col gap-0.5">
-          {tabs.map((t) => {
-            const active = path.startsWith(t.to);
-            const className = `flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-              active
-                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-            }`;
-            return (
-              <Link key={t.to} to={t.to} className={className}>
-                <t.icon className="h-4 w-4 opacity-90" /> {t.label}
-              </Link>
-            );
-          })}
-          {isAdmin ? (
-            <Link
-              to="/app/admin/analytics"
-              className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
-                path.startsWith("/app/admin")
-                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-              }`}
-            >
-              <BarChart3 className="h-4 w-4 opacity-90" /> 分析
-            </Link>
-          ) : null}
-        </nav>
-        <div className="mt-auto">
-          <button
-            type="button"
-            onClick={async () => {
-              await signOut();
-              window.location.href = "/";
-            }}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
-          >
-            <LogOut className="h-4 w-4" /> Sign out
-          </button>
-        </div>
+      <aside className="wiki-sidebar fixed inset-y-0 left-0 z-30 hidden w-64 min-h-0 flex-col overflow-hidden p-5 md:flex">
+        <WikiAppSidebar
+          showAdmin={isAdmin}
+          onSignOut={async () => {
+            await signOut();
+            window.location.href = "/";
+          }}
+        />
       </aside>
 
-      <main className={cn("flex-1 md:pl-60", isReviewChat && "flex min-h-0 flex-col overflow-hidden")}>
+      <main className={cn("wiki-main md:pl-64", isReviewChat && "flex min-h-0 flex-col overflow-hidden")}>
         <div
           className={cn(
             isReviewChat
               ? "mx-auto flex h-full min-h-0 w-full max-w-none flex-1 flex-col"
-              : "mx-auto w-full max-w-5xl px-5 pb-28 pt-6 md:pb-12 md:pt-10",
+              : "wiki-page-wrap",
           )}
         >
           <Outlet />
@@ -118,16 +83,17 @@ function AppShell() {
       </main>
 
       {!isReviewChat ? (
-        <nav className="safe-bottom fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden">
+        <nav className="wiki-mobile-nav safe-bottom fixed inset-x-0 bottom-0 z-40 md:hidden">
           <div className={cn("mx-auto grid max-w-lg", isAdmin ? "grid-cols-3" : "grid-cols-2")}>
             {tabs.map((t) => {
               const active = path.startsWith(t.to);
-              const className = `flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
-                active ? "font-medium text-primary" : "text-muted-foreground"
-              }`;
               return (
-                <Link key={t.to} to={t.to} className={className}>
-                  <t.icon className="h-5 w-5" />
+                <Link
+                  key={t.to}
+                  to={t.to}
+                  data-active={active}
+                  className="wiki-mobile-tab"
+                >
                   {t.label}
                 </Link>
               );
@@ -135,18 +101,22 @@ function AppShell() {
             {isAdmin ? (
               <Link
                 to="/app/admin/analytics"
-                className={`flex flex-col items-center gap-1 px-1 py-2.5 text-[11px] ${
-                  path.startsWith("/app/admin")
-                    ? "font-medium text-primary"
-                    : "text-muted-foreground"
-                }`}
+                data-active={path.startsWith("/app/admin")}
+                className="wiki-mobile-tab"
               >
-                <BarChart3 className="h-5 w-5" />
                 分析
               </Link>
             ) : null}
           </div>
         </nav>
+      ) : null}
+
+      {!isReviewChat ? (
+        <div className="pointer-events-none fixed right-4 top-4 z-20 md:hidden">
+          <div className="pointer-events-auto">
+            <ThemeToggle />
+          </div>
+        </div>
       ) : null}
     </div>
   );

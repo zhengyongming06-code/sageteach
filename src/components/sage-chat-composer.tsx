@@ -117,7 +117,7 @@ export const SageChatComposer = memo(
                 type="submit"
                 disabled={!canSubmit}
                 size="icon"
-                className="absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full bg-[#1a1a2e] text-white hover:bg-[#1a1a2e]/90"
+                className="wiki-user-bubble absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full hover:opacity-90"
               >
                 <SendArrowIcon />
               </Button>

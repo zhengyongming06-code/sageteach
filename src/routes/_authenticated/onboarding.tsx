@@ -7,6 +7,9 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import { syncProfileNearestExam } from "@/lib/user-exams";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { appCanvasClass, appSurfaceCardClass } from "@/lib/shell-styles";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/onboarding")({
   component: Onboarding,
@@ -199,7 +202,11 @@ function Onboarding() {
   const last = step === steps.length - 1;
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-md flex-col px-6 py-10">
+    <div className={cn(appCanvasClass, "relative min-h-screen")}>
+      <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
+        <ThemeToggle compact />
+      </div>
+      <div className={cn("mx-auto flex min-h-screen max-w-md flex-col px-6 py-10", appSurfaceCardClass, "my-0 border-0 bg-transparent shadow-none md:my-8 md:border md:bg-card/80 md:p-8 md:shadow-[0_24px_60px_rgba(15,23,42,0.08)]")}>
       <div className="mb-8 flex gap-1.5">
         {steps.map((_, i) => (
           <div
@@ -240,6 +247,7 @@ function Onboarding() {
             下一步
           </Button>
         )}
+      </div>
       </div>
     </div>
   );

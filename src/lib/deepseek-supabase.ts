@@ -70,7 +70,18 @@ function logDeepSeekEnvOnce() {
 function throwForDeepSeekHttpError(status: number, raw: string, context: string): never {
   logUpstreamResponse(context, status, raw);
   if (status === 401 || status === 403) {
-    throw new DeepSeekAuthError();
+    let detail = "";
+    try {
+      const j = JSON.parse(raw) as { error?: { message?: string } };
+      detail = j.error?.message?.trim() ?? "";
+    } catch {
+      /* ignore */
+    }
+    const devHint =
+      import.meta.env.DEV && (detail.includes("invalid") || detail.includes("Authentication"))
+        ? "DeepSeek API Key 无效或已失效。请在 platform.deepseek.com 重新生成，更新 .env 中的 VITE_DEEPSEEK_API_KEY 后重启 dev server。"
+        : null;
+    throw new DeepSeekAuthError(devHint ?? "AI服务密钥失效，请联系管理员");
   }
   throw new Error(`AI 服务暂时不可用（${status}）`);
 }

@@ -44,7 +44,7 @@ function AssistantBubbleContent({
   streaming?: boolean;
 }) {
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground/90">
+    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-[var(--wiki-fg)] prose-p:leading-relaxed">
       {content !== "" ? (
         <ReactMarkdown urlTransform={markdownUrlTransform} components={markdownComponents}>
           {content}
@@ -131,7 +131,7 @@ export const SageChatMessageList = memo(function SageChatMessageList({
       {isMobile ? (
         <div className="flex max-w-[94%] flex-col items-start gap-1">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
+            <span className="wiki-sage-dot h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
             Sage
           </div>
           <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-white px-4 py-4 shadow-sm">
@@ -151,15 +151,15 @@ export const SageChatMessageList = memo(function SageChatMessageList({
       {isMobile ? (
         <div className="flex max-w-[88%] flex-col items-start gap-1">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1a1a2e]" aria-hidden />
+            <span className="wiki-sage-dot h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
             Sage
           </div>
-          <div className="rounded-[4px_16px_16px_16px] border border-border bg-white px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+          <div className="rounded-[4px_16px_16px_16px] border border-border bg-white px-4 py-2.5 text-[15px] leading-relaxed text-[var(--wiki-fg)]">
             <AssistantBubbleContent content={content} streaming={streaming} />
           </div>
         </div>
       ) : (
-        <div className="max-w-[88%] rounded-2xl border border-border bg-background px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+        <div className="max-w-[88%] rounded-2xl border border-border bg-white px-4 py-2.5 text-[15px] leading-relaxed text-[var(--wiki-fg)]">
           <AssistantBubbleContent content={content} streaming={streaming} />
         </div>
       )}
@@ -222,10 +222,10 @@ export const SageChatMessageList = memo(function SageChatMessageList({
             {isUser ? (
               <div
                 className={cn(
-                  "max-w-[88%] px-4 py-2.5 text-[15px] leading-relaxed",
+                  "wiki-user-bubble max-w-[88%] px-4 py-2.5 text-[15px] leading-relaxed text-white",
                   isMobile
-                    ? "rounded-[16px_4px_16px_16px] bg-[#1a1a2e] text-white"
-                    : "rounded-2xl bg-primary text-primary-foreground",
+                    ? "rounded-[16px_4px_16px_16px]"
+                    : "rounded-2xl",
                   isFlyingUser && "message-new",
                 )}
               >

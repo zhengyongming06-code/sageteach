@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="From confusion to clarity" />
-    <meta name="theme-color" content="#f8f9fa" />
+    <meta name="theme-color" content="#f8fafc" />
     <meta property="og:title" content="Sage — From confusion to clarity" />
     <meta name="twitter:title" content="Sage — From confusion to clarity" />
     <meta property="og:description" content="From confusion to clarity" />
@@ -22,11 +22,29 @@
     <title>Sage — From confusion to clarity</title>
     <link
       rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap"
+    />
+    <link
+      rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css"
       crossorigin="anonymous"
     />
   </head>
   <body>
+    <script>
+      (function () {
+        try {
+          var key = "sage-theme";
+          var pref = localStorage.getItem(key);
+          var dark =
+            pref === "dark" ||
+            (pref !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

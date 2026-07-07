@@ -1,6 +1,7 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
+@import "./styles/syllagrid.css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
@@ -46,6 +47,8 @@
   --color-warm-foreground: var(--warm-foreground);
   --color-ink: var(--ink);
   --color-sage: var(--sage);
+  --color-heading: var(--heading);
+  --color-heading-display: var(--heading-display);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -55,116 +58,163 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC",
-    "Noto Sans SC", "Microsoft YaHei", "Helvetica Neue", Inter, system-ui,
-    sans-serif;
+  --font-latin: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-cjk:
+    "PingFang SC", "Noto Sans SC", "HarmonyOS Sans SC", "Microsoft YaHei UI",
+    "Source Han Sans SC", sans-serif;
+  --font-sans: var(--font-cjk);
   --font-serif: "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
 }
 
 :root {
-  --radius: 0.75rem;
+  --radius: 0.625rem;
 
-  /* Deep navy, soft white canvas, electric blue accent */
-  --background: #f8f9fa;
-  --foreground: #0f1b2d;
+  /* Syllagrid.com tokens — https://syllagrid.com/styles.css */
+  --ink: #0f172a;
+  --syllagrid-muted: #475569;
+  --syllagrid-quiet: #64748b;
+  --syllagrid-paper: #f7f9fb;
+  --syllagrid-line: #cbd5e1;
+  --syllagrid-blue: #2563eb;
+  --syllagrid-teal: #0f9f8f;
+  --eyebrow: #008b7a;
+
+  /* Quartz neutral dark palette (no blue tint) */
+  --quartz-bg: #161617;
+  --quartz-elevated: #1f1f1f;
+  --quartz-surface: #222222;
+  --quartz-text: #d4d4d4;
+  --quartz-muted: #737373;
+  --quartz-heading: #e8e8e8;
+  --quartz-link: #8ca0b3;
+
+  --background: #f8fafc;
+  --foreground: var(--syllagrid-muted);
+
+  --heading: var(--ink);
+  --heading-display: var(--ink);
 
   --card: #ffffff;
-  --card-foreground: #0f1b2d;
+  --card-foreground: var(--ink);
   --popover: #ffffff;
-  --popover-foreground: #0f1b2d;
+  --popover-foreground: var(--ink);
 
-  --primary: #0f1b2d;
-  --primary-foreground: #f8f9fa;
+  --primary: var(--ink);
+  --primary-foreground: #ffffff;
 
-  --secondary: #eef1f5;
-  --secondary-foreground: #0f1b2d;
+  --secondary: var(--syllagrid-paper);
+  --secondary-foreground: var(--ink);
 
-  --muted: #eef1f5;
-  --muted-foreground: #5c6b7f;
+  --muted: #f1f5f9;
+  --muted-foreground: var(--syllagrid-quiet);
 
-  --accent: #e8f1fb;
-  --accent-foreground: #1a4a7a;
+  --accent: #eef2ff;
+  --accent-foreground: var(--syllagrid-blue);
 
   --destructive: oklch(0.55 0.18 25);
   --destructive-foreground: #fafafa;
 
-  --border: #e2e6eb;
-  --input: #e2e6eb;
-  --ring: #4a90e2;
+  --border: var(--syllagrid-line);
+  --input: var(--syllagrid-line);
+  --ring: var(--syllagrid-blue);
 
-  --warm: #e8f1fb;
-  --warm-foreground: #1a3d66;
-  --ink: #0f1b2d;
-  --sage: #4a90e2;
+  --warm: #f7f9fb;
+  --warm-foreground: #1e40af;
+  --sage: var(--syllagrid-teal);
 
-  --sidebar: #0f1b2d;
-  --sidebar-foreground: #e8ecf2;
-  --sidebar-primary: #4a90e2;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #334155;
+  --sidebar-primary: var(--syllagrid-teal);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgba(74, 144, 226, 0.18);
-  --sidebar-accent-foreground: #f8f9fa;
-  --sidebar-border: rgba(255, 255, 255, 0.1);
-  --sidebar-ring: #4a90e2;
+  --sidebar-accent: rgba(15, 159, 143, 0.1);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: var(--syllagrid-blue);
+
+  --sage-canvas-a: rgba(37, 99, 235, 0.08);
+  --sage-canvas-b: rgba(15, 159, 143, 0.06);
+  --sage-canvas-base: #f8fafc;
+  --sage-glass: rgba(248, 250, 252, 0.82);
+  --shadow-soft: 0 24px 60px rgba(15, 23, 42, 0.1);
+  --shadow-lift: 0 24px 60px rgba(15, 23, 42, 0.14);
 }
 
 .dark {
-  --background: #0c1219;
-  --foreground: #e8ecf2;
+  --eyebrow: var(--quartz-muted);
+  --ink: var(--quartz-heading);
 
-  --card: #131b26;
-  --card-foreground: #e8ecf2;
-  --popover: #131b26;
-  --popover-foreground: #e8ecf2;
+  --background: var(--quartz-bg);
+  --foreground: var(--quartz-text);
 
-  --primary: #4a90e2;
-  --primary-foreground: #0f1b2d;
+  --heading: var(--quartz-heading);
+  --heading-display: var(--quartz-heading);
 
-  --secondary: #1a2433;
-  --secondary-foreground: #e8ecf2;
+  --card: var(--quartz-elevated);
+  --card-foreground: var(--quartz-text);
+  --popover: var(--quartz-elevated);
+  --popover-foreground: var(--quartz-text);
 
-  --muted: #1a2433;
-  --muted-foreground: #94a3b8;
+  --primary: var(--quartz-link);
+  --primary-foreground: var(--quartz-bg);
 
-  --accent: #1e3a5f;
-  --accent-foreground: #b8d4f5;
+  --secondary: var(--quartz-surface);
+  --secondary-foreground: var(--quartz-text);
+
+  --muted: var(--quartz-elevated);
+  --muted-foreground: var(--quartz-muted);
+
+  --accent: rgba(140, 160, 179, 0.12);
+  --accent-foreground: var(--quartz-link);
 
   --destructive: oklch(0.65 0.18 25);
-  --destructive-foreground: #fafafa;
+  --destructive-foreground: var(--quartz-heading);
 
-  --border: rgba(255, 255, 255, 0.09);
-  --input: rgba(255, 255, 255, 0.1);
-  --ring: #4a90e2;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: var(--quartz-link);
 
-  --warm: #1e3a5f;
-  --warm-foreground: #b8d4f5;
-  --ink: #e8ecf2;
-  --sage: #4a90e2;
+  --warm: var(--quartz-elevated);
+  --warm-foreground: var(--quartz-link);
+  --sage: var(--quartz-muted);
 
-  --sidebar: #0a1018;
-  --sidebar-foreground: #e8ecf2;
-  --sidebar-primary: #4a90e2;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: rgba(74, 144, 226, 0.15);
-  --sidebar-accent-foreground: #e8ecf2;
-  --sidebar-border: rgba(255, 255, 255, 0.08);
-  --sidebar-ring: #4a90e2;
+  --sidebar: var(--quartz-bg);
+  --sidebar-foreground: var(--quartz-text);
+  --sidebar-primary: var(--quartz-link);
+  --sidebar-primary-foreground: var(--quartz-bg);
+  --sidebar-accent: rgba(255, 255, 255, 0.04);
+  --sidebar-accent-foreground: var(--quartz-heading);
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-ring: var(--quartz-link);
+
+  --sage-canvas-a: transparent;
+  --sage-canvas-b: transparent;
+  --sage-canvas-base: var(--quartz-bg);
+  --sage-glass: rgba(22, 22, 23, 0.92);
+  --shadow-soft: none;
+  --shadow-lift: none;
 }
 
 @layer base {
   * { border-color: var(--color-border); }
   html, body { height: 100%; }
+  html { color-scheme: light dark; }
   body {
     background: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     font-feature-settings: "ss01", "cv11";
   }
   h1, h2, h3, h4 {
-    letter-spacing: -0.01em;
-    font-weight: 600;
+    color: var(--heading);
+    letter-spacing: -0.02em;
+    font-weight: 650;
+    line-height: 1.15;
+  }
+  p {
+    line-height: 1.65;
   }
 }
 
@@ -182,6 +232,120 @@
   }
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+  }
+
+  .sage-page-canvas {
+    background:
+      radial-gradient(circle at 70% 45%, var(--sage-canvas-a), transparent 34%),
+      radial-gradient(circle at 20% 30%, var(--sage-canvas-b), transparent 30%),
+      var(--sage-canvas-base);
+  }
+
+  .sage-display-heading {
+    color: var(--heading-display);
+  }
+
+  .sage-section-heading {
+    color: var(--heading);
+  }
+
+  .sage-eyebrow {
+    color: var(--eyebrow);
+  }
+
+  .sage-link-pill {
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--card) 88%, var(--muted));
+    color: var(--accent-foreground);
+    padding: 0.2rem 0.65rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  .sage-link-pill:hover {
+    background: var(--accent);
+  }
+
+  .sage-surface-shadow {
+    box-shadow: var(--shadow-soft);
+  }
+
+  .sage-header-glass {
+    background: color-mix(in oklab, var(--sage-glass) 92%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid color-mix(in oklab, var(--color-border) 65%, transparent);
+  }
+
+  .sage-primary-btn {
+    background: var(--color-primary);
+    color: var(--color-primary-foreground);
+    box-shadow: var(--shadow-soft);
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 0.28s ease,
+      color 0.28s ease;
+  }
+
+  .sage-primary-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lift);
+  }
+
+  .sage-surface-btn {
+    border: 1px solid var(--syllagrid-line);
+    background: var(--color-card);
+    color: var(--ink);
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 0.28s ease,
+      background-color 0.28s ease,
+      color 0.28s ease;
+  }
+
+  .sage-surface-btn:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in oklab, var(--color-ring) 35%, var(--color-border));
+  }
+}
+
+html.theme-transition,
+html.theme-transition body,
+html.theme-transition .wiki-app,
+html.theme-transition .wiki-sidebar,
+html.theme-transition .sage-page-canvas,
+html.theme-transition .sage-header-glass,
+html.theme-transition [class*="bg-card"],
+html.theme-transition [class*="bg-background"],
+html.theme-transition [class*="bg-sidebar"],
+html.theme-transition [class*="border-border"],
+html.theme-transition [class*="text-foreground"],
+html.theme-transition .sage-display-heading,
+html.theme-transition .sage-section-heading,
+html.theme-transition h1,
+html.theme-transition h2,
+html.theme-transition h3 {
+  transition:
+    background-color 0.32s ease,
+    border-color 0.32s ease,
+    color 0.32s ease,
+    box-shadow 0.32s ease !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transition,
+  html.theme-transition body,
+  html.theme-transition .sage-page-canvas,
+  html.theme-transition .sage-header-glass,
+  html.theme-transition [class*="bg-card"],
+  html.theme-transition [class*="bg-background"],
+  html.theme-transition [class*="bg-sidebar"],
+  html.theme-transition [class*="border-border"],
+  html.theme-transition [class*="text-foreground"],
+  html.theme-transition [class*="text-muted-foreground"] {
+    transition: none !important;
   }
 }
 

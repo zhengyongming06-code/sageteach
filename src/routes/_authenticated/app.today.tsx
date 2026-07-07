@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -9,16 +9,17 @@ import {
   fetchDiagnosticBannerEligible,
 } from "@/lib/diagnostic-eligibility";
 import { safeSessionGet, safeSessionSet } from "@/lib/safe-storage";
-import { Sparkles, Clock, Target, ChevronRight, X } from "lucide-react";
+import { X } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
-  subjectAccentCardClass,
-  todayHeroShellClass,
+  subjectAccentTaskClass,
 } from "@/lib/subject-accent";
+import { KnowledgeTodayPanel } from "@/components/knowledge-today-panel";
+import { TodayPageRail, type TodayTocSection } from "@/components/today-page-rail";
+import { SAGE_KNOWLEDGE_REFRESH_EVENT } from "@/lib/knowledge-tracking/ingest-client";
 import {
   fetchWeakArchive,
   formatArchiveDateLabel,
@@ -35,8 +36,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { KnowledgeTodayPanel } from "@/components/knowledge-today-panel";
-import { SAGE_KNOWLEDGE_REFRESH_EVENT } from "@/lib/knowledge-tracking/ingest-client";
 
 export const Route = createFileRoute("/_authenticated/app/today")({ component: Today });
 
@@ -99,6 +98,16 @@ function Today() {
   const [archiveCelebrateId, setArchiveCelebrateId] = useState<string | null>(null);
   const celebrateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [diagnosticBannerDismissed, setDiagnosticBannerDismissed] = useState(false);
+  const [knowledgeToc, setKnowledgeToc] = useState<TodayTocSection[]>([]);
+
+  const tocSections = useMemo<TodayTocSection[]>(
+    () => [
+      { id: "overview", label: "概览" },
+      ...knowledgeToc,
+      { id: "archive", label: "卡点档案" },
+    ],
+    [knowledgeToc],
+  );
 
   useEffect(() => {
     if (!user?.id) {
@@ -264,6 +273,22 @@ function Today() {
     refetchIntervalInBackground: true,
   });
 
+  const progressLine = useMemo(() => {
+    if (dailyProgressError) return "今日进度加载失败";
+    if (dailyProgress == null) {
+      if (loadDeadlinePassed && dailyProgressLoading) return "今日进度加载较慢";
+      if (dailyProgressLoading) return "加载进度…";
+      return "今日复盘 0 科 · 卡点攻克 0 个";
+    }
+    return `今日复盘 ${dailyProgress.subjectCount} 科 · 卡点攻克 ${dailyProgress.clearedCount} 个`;
+  }, [dailyProgress, dailyProgressError, dailyProgressLoading, loadDeadlinePassed]);
+
+  const examMetaLine = useMemo(() => {
+    if (examCountdownDays === null) return "添加考试日程";
+    if (examCountdownDays < 0) return `${examCountdownName} 已过 ${-examCountdownDays} 天`;
+    return `距${examCountdownName} ${examCountdownDays} 天`;
+  }, [examCountdownDays, examCountdownName]);
+
   const { data: diagnosticBannerEligible = false } = useQuery({
     queryKey: diagnosticEligibilityQueryKey(user?.id ?? ""),
     enabled: !!user?.id,
@@ -406,205 +431,180 @@ function Today() {
   // const showDailyQuestion = summaryCountReady && !summaryCountError && (summaryCount ?? 0) > 0;
 
   return (
-    <div className="flex w-full flex-col md:gap-6">
-      <div className={todayHeroShellClass}>
-        <header className="shrink-0">
-          <p className="text-sm text-muted-foreground">{greet}</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-            {examSprint ? `还有 ${examCountdownDays} 天。今天只做一件事。` : "今天，从最重要的一件事开始。"}
+    <div className="wiki-page-grid">
+      <article className="wiki-prose wiki-prose-sheet">
+        <nav className="wiki-breadcrumb" aria-label="面包屑">
+          <Link to="/app/today">Home</Link>
+          <span className="wiki-breadcrumb-sep">›</span>
+          <Link to="/app/today">Today</Link>
+          <span className="wiki-breadcrumb-sep">›</span>
+          <span className="text-[var(--wiki-nav-fg)]">Overview</span>
+        </nav>
+
+        <header id="overview" className="wiki-prose-section !mt-0">
+          <h1 className="wiki-page-title">
+            {examSprint ? `还有 ${examCountdownDays} 天` : "Today"}
           </h1>
-          {examSprint ? (
-            <span className="mt-2 inline-flex rounded-full border border-amber-400/70 bg-amber-100/90 px-3 py-0.5 text-xs font-semibold text-amber-950 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-50">
-              冲刺模式
-            </span>
+          <div className="wiki-meta-row">
+            <span>{greet}</span>
+            <span className="wiki-meta-sep">·</span>
+            <MetaScore
+              label="目标分"
+              value={profile?.target_score}
+              active={editing === "target"}
+              draft={editDraft}
+              onDraftChange={setEditDraft}
+              onActivate={() => beginEdit("target")}
+              onSave={() => void saveField("target")}
+              onCancel={cancelEdit}
+            />
+            <span className="wiki-meta-sep">·</span>
+            <MetaScore
+              label="当前分"
+              value={profile?.current_score}
+              active={editing === "current"}
+              draft={editDraft}
+              onDraftChange={setEditDraft}
+              onActivate={() => beginEdit("current")}
+              onSave={() => void saveField("current")}
+              onCancel={cancelEdit}
+            />
+            <span className="wiki-meta-sep">·</span>
+            <button
+              type="button"
+              className={cn("wiki-meta-btn", examUrgent && "text-foreground font-medium")}
+              onClick={() => setExamScheduleOpen(true)}
+            >
+              {examMetaLine}
+            </button>
+          </div>
+          {examSprint || profile?.target_score != null ? (
+            <div className="wiki-tags">
+              {examSprint ? <span className="wiki-tag">冲刺模式</span> : null}
+              {profile?.target_score != null ? (
+                <span className="wiki-tag">目标 {profile.target_score}</span>
+              ) : null}
+            </div>
           ) : null}
+          {!examSprint ? (
+            <p className="mt-4 text-base leading-relaxed text-[var(--wiki-fg)]">
+              今天，从最重要的一件事开始。
+            </p>
+          ) : (
+            <p className="mt-4 text-base leading-relaxed text-[var(--wiki-fg)]">
+              冲刺阶段——今天只做一件事。
+            </p>
+          )}
         </header>
 
-        <div className="mt-6 grid shrink-0 grid-cols-3 gap-3">
-        <StatCard
-          icon={Target}
-          label="目标分"
-          display={profile?.target_score != null ? `${profile.target_score}` : "—"}
-          hint="点击编辑"
-          active={editing === "target"}
-          draft={editDraft}
-          onDraftChange={setEditDraft}
-          onActivate={() => beginEdit("target")}
-          onSave={() => void saveField("target")}
-          onCancel={cancelEdit}
-          inputMode="numeric"
-          placeholder="分数"
-        />
-        <StatCard
-          icon={Sparkles}
-          label="当前分"
-          display={profile?.current_score != null ? `${profile.current_score}` : "—"}
-          hint="点击编辑"
-          active={editing === "current"}
-          draft={editDraft}
-          onDraftChange={setEditDraft}
-          onActivate={() => beginEdit("current")}
-          onSave={() => void saveField("current")}
-          onCancel={cancelEdit}
-          inputMode="numeric"
-          placeholder="分数"
-        />
-        <ExamCountdownCard
-          examName={examCountdownName}
-          days={examCountdownDays}
-          urgent={examUrgent}
-          onOpenSchedule={() => setExamScheduleOpen(true)}
-        />
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-4 max-md:bg-muted/30 max-md:px-1 max-md:pb-2 max-md:pt-4 md:gap-6">
-      <section
-        className="shrink-0 rounded-2xl border border-border bg-card px-4 py-3 text-center text-sm text-foreground shadow-sm"
-        aria-label="今日进度"
-      >
-        {dailyProgressError ? (
-          <span className="text-destructive">今日进度加载失败</span>
-        ) : dailyProgress != null ? (
-          <span className="font-medium tabular-nums">
-            今日复盘 {dailyProgress.subjectCount} 科 · 卡点攻克 {dailyProgress.clearedCount} 个
-          </span>
-        ) : loadDeadlinePassed && dailyProgressLoading ? (
-          <span className="text-muted-foreground">今日进度加载较慢，可稍后再试或刷新页面。</span>
-        ) : dailyProgressLoading ? (
-          <span className="text-muted-foreground">今日进度加载中…</span>
-        ) : (
-          <span className="font-medium tabular-nums">
-            今日复盘 0 科 · 卡点攻克 0 个
-          </span>
-        )}
-      </section>
-
-      {showDiagnosticBanner ? (
-        <section
-          className="relative shrink-0 rounded-3xl border border-sky-200/80 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800/50 dark:bg-sky-950/30"
-          aria-label="知识点诊断"
-        >
-          <button
-            type="button"
-            onClick={dismissDiagnosticBanner}
-            className="absolute right-3 top-3 rounded-lg p-1 text-muted-foreground hover:bg-black/5 hover:text-foreground"
-            aria-label="关闭提示"
-          >
-            <X className="h-4 w-4" />
-          </button>
-          <p className="pr-8 text-sm leading-relaxed text-sky-950 dark:text-sky-50">
-            做个知识点诊断，Sage 按全科考点帮你找出最需要补的部分
-            <ChevronRight className="ml-0.5 inline h-4 w-4 align-text-bottom" aria-hidden />
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button asChild className="rounded-xl" size="sm">
-              <Link to="/app/diagnostic">开始诊断</Link>
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="rounded-xl text-muted-foreground"
-              onClick={dismissDiagnosticBanner}
-            >
-              稍后再说
-            </Button>
-          </div>
-        </section>
-      ) : null}
-
-      {user?.id ? <KnowledgeTodayPanel userId={user.id} /> : null}
-
-      {/* 每日一问：暂时关闭（题目质量优化后再开）。保留实现于 components/daily-question-card.tsx + lib/daily-question.ts
-      {user?.id ? (
-        <DailyQuestionCard userId={user.id} questionDate={localYmd()} enabled={showDailyQuestion} />
-      ) : null}
-      */}
-
-      <section className="shrink-0 rounded-3xl border border-border bg-card p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight">我的卡点档案</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              按时间整理的复盘小结，勾选表示这个卡点已搞定。
-            </p>
-          </div>
-          <Link
-            to="/app/diagnostic"
-            className="shrink-0 text-xs font-medium text-primary hover:underline"
-          >
-            知识点诊断 →
-          </Link>
-        </div>
-
-        {archiveError ? (
-          <p className="mt-4 text-sm text-destructive">卡点档案加载失败。</p>
-        ) : archiveLoading && !loadDeadlinePassed ? (
-          <p className="mt-4 text-sm text-muted-foreground">加载档案…</p>
-        ) : archiveLoading && loadDeadlinePassed ? (
-          <p className="mt-4 text-sm text-muted-foreground">档案加载较慢，请稍后再试或刷新页面。</p>
-        ) : archiveRows.length === 0 ? (
-          <p className="mt-4 rounded-2xl border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
-            还没有卡点记录。完成第一次复盘后，你的档案会出现在这里。
-          </p>
-        ) : (
-          <ul className="relative mt-4 space-y-3 md:space-y-4 md:border-l md:border-border md:pl-4">
-            {archiveRows.map((r) => (
-              <li key={r.id} className="relative md:pl-0">
-                <span className="absolute -left-[21px] top-3 hidden h-2.5 w-2.5 rounded-full border-2 border-background bg-muted-foreground/50 md:block" />
-                <div
-                  className={cn(
-                    "overflow-hidden rounded-2xl border border-border py-3 pl-4 pr-3 shadow-sm",
-                    subjectAccentCardClass(r.subject),
-                  )}
+        {showDiagnosticBanner ? (
+          <section className="wiki-prose-section">
+            <div className="wiki-callout relative" aria-label="知识点诊断">
+              <button
+                type="button"
+                onClick={dismissDiagnosticBanner}
+                className="absolute right-3 top-3 rounded-lg p-1 text-muted-foreground hover:bg-[var(--wiki-hover)] hover:text-foreground"
+                aria-label="关闭提示"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <p className="pr-8 text-sm leading-relaxed">
+                做个知识点诊断，Sage 按全科考点帮你找出最需要补的部分
+              </p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Link to="/app/diagnostic" className="wiki-link-text text-sm">
+                  开始诊断 →
+                </Link>
+                <button
+                  type="button"
+                  className="wiki-meta-btn text-sm"
+                  onClick={dismissDiagnosticBanner}
                 >
-                  <div className="flex flex-wrap items-start gap-2">
-                    <Checkbox
-                      id={`arch-${r.id}`}
-                      checked={r.completed}
-                      onCheckedChange={(v) => onArchiveCheck(r.id, v === true)}
-                      className="mt-0.5 shrink-0"
-                      aria-label={`标记卡点已解决：${r.subject}`}
-                    />
+                  稍后再说
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {user?.id ? (
+          <KnowledgeTodayPanel userId={user.id} onTocChange={setKnowledgeToc} />
+        ) : null}
+
+        <section id="archive" className="wiki-prose-section">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="wiki-prose-h2">卡点档案</h2>
+            <Link to="/app/diagnostic" className="wiki-link-text shrink-0">
+              知识点诊断 →
+            </Link>
+          </div>
+          <p className="wiki-prose-lead">
+            按时间整理的复盘小结，点击「标记完成」表示这个卡点已搞定。
+          </p>
+
+          {archiveError ? (
+            <p className="text-sm text-destructive">卡点档案加载失败。</p>
+          ) : archiveLoading && !loadDeadlinePassed ? (
+            <p className="wiki-prose-sub">加载档案…</p>
+          ) : archiveLoading && loadDeadlinePassed ? (
+            <p className="wiki-prose-sub">档案加载较慢，请稍后再试或刷新页面。</p>
+          ) : archiveRows.length === 0 ? (
+            <p className="wiki-prose-sub">
+              还没有卡点记录。完成第一次复盘后，你的档案会出现在这里。
+            </p>
+          ) : (
+            <ul className="wiki-prose-list">
+              {archiveRows.map((r) => (
+                <li key={r.id} className={cn(subjectAccentTaskClass(r.subject))}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <time
-                        className="text-xs tabular-nums text-muted-foreground"
-                        dateTime={r.session_date}
-                      >
-                        {formatArchiveDateLabel(r.session_date, r.created_at)}
-                      </time>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <time className="wiki-prose-sub text-xs tabular-nums" dateTime={r.session_date}>
+                          {formatArchiveDateLabel(r.session_date, r.created_at)}
+                        </time>
+                        <span className="wiki-tag">{r.subject}</span>
+                      </div>
                       <p
                         className={cn(
-                          "mt-2 text-sm font-medium text-foreground",
-                          r.completed && "text-muted-foreground line-through",
+                          "mt-1.5 text-sm font-medium text-[var(--wiki-fg)]",
+                          r.completed && "text-[var(--wiki-muted)] line-through",
                         )}
                       >
                         {r.weak_point}
                       </p>
                       <p
                         className={cn(
-                          "mt-1 text-sm text-muted-foreground",
+                          "mt-1 text-sm text-[var(--wiki-nav-fg)]",
                           r.completed && "line-through opacity-80",
                         )}
                       >
-                        <span className="text-muted-foreground/80">今晚任务：</span>
-                        {r.tonight_task}
+                        今晚任务：{r.tonight_task}
                       </p>
                       {archiveCelebrateId === r.id ? (
-                        <p className="mt-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                          ✓ 搞定了这个卡点 🎯
-                        </p>
+                        <p className="mt-2 text-sm text-[var(--wiki-nav-fg)]">✓ 搞定了这个卡点</p>
                       ) : null}
                     </div>
+                    <button
+                      type="button"
+                      className="wiki-inline-action"
+                      onClick={() => onArchiveCheck(r.id, !r.completed)}
+                    >
+                      {r.completed ? "取消完成" : "标记完成"}
+                    </button>
                   </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </article>
+
+      <TodayPageRail
+        userId={user?.id}
+        sections={tocSections}
+        progressLine={progressLine}
+        progressLoading={dailyProgressLoading && dailyProgress == null}
+      />
 
       {user?.id ? (
         <ExamScheduleDialog open={examScheduleOpen} onOpenChange={setExamScheduleOpen} userId={user.id} />
@@ -613,43 +613,64 @@ function Today() {
   );
 }
 
-function ExamCountdownCard({
-  examName,
-  days,
-  urgent,
-  onOpenSchedule,
+function MetaScore({
+  label,
+  value,
+  active,
+  draft,
+  onDraftChange,
+  onActivate,
+  onSave,
+  onCancel,
 }: {
-  examName: string;
-  days: number | null;
-  urgent: boolean;
-  onOpenSchedule: () => void;
+  label: string;
+  value: number | null | undefined;
+  active: boolean;
+  draft: string;
+  onDraftChange: (v: string) => void;
+  onActivate: () => void;
+  onSave: () => void;
+  onCancel: () => void;
 }) {
-  const line =
-    days === null
-      ? "添加考试日程"
-      : days < 0
-        ? `${examName} 已过 ${-days} 天`
-        : `距${examName} ${days} 天`;
-  const sub =
-    days === null
-      ? "点击设置考试名称与日期"
-      : "以最近一场为准 · 可管理多场考试";
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (active) {
+      queueMicrotask(() => inputRef.current?.focus());
+      inputRef.current?.select();
+    }
+  }, [active]);
+
+  if (active) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          value={draft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          className="wiki-meta-input"
+          onBlur={() => void onSave()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void onSave();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+        />
+      </span>
+    );
+  }
 
   return (
-    <button
-      type="button"
-      onClick={onOpenSchedule}
-      className={cn(
-        "w-full rounded-2xl border border-border bg-card p-4 text-left outline-none transition hover:border-ring/50 focus-visible:ring-2 focus-visible:ring-ring",
-        urgent && "border-amber-500/55 bg-amber-500/[0.08] shadow-[0_0_0_1px_rgba(245,158,11,0.12)]",
-      )}
-    >
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Clock className="h-3.5 w-3.5" />
-        倒计时
-      </div>
-      <div className="mt-1 text-lg font-semibold leading-snug tabular-nums">{line}</div>
-      <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
+    <button type="button" className="wiki-meta-btn" onClick={onActivate}>
+      {label} {value != null ? value : "—"}
     </button>
   );
 }
@@ -828,97 +849,5 @@ function ExamScheduleDialog({
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  display,
-  hint,
-  active,
-  draft,
-  onDraftChange,
-  onActivate,
-  onSave,
-  onCancel,
-  inputMode,
-  placeholder,
-}: {
-  icon: typeof Target;
-  label: string;
-  display: string;
-  hint: string;
-  active: boolean;
-  draft: string;
-  onDraftChange: (v: string) => void;
-  onActivate: () => void;
-  onSave: () => void;
-  onCancel: () => void;
-  inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"];
-  placeholder: string;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (active) {
-      queueMicrotask(() => inputRef.current?.focus());
-      inputRef.current?.select();
-    }
-  }, [active]);
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => {
-        if (!active) onActivate();
-      }}
-      onKeyDown={(e) => {
-        if (!active && (e.key === "Enter" || e.key === " ")) {
-          e.preventDefault();
-          onActivate();
-        }
-      }}
-      className={cn(
-        "rounded-2xl border border-border bg-card p-4 text-left outline-none transition hover:border-ring/40 focus-visible:ring-2 focus-visible:ring-ring",
-        active && "border-ring ring-1 ring-ring",
-      )}
-    >
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </div>
-      {active ? (
-        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-          <Input
-            ref={inputRef}
-            type="text"
-            inputMode={inputMode}
-            value={draft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            placeholder={placeholder}
-            className="h-9 rounded-xl text-lg font-semibold tabular-nums"
-            onBlur={() => void onSave()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void onSave();
-              }
-              if (e.key === "Escape") {
-                e.preventDefault();
-                onCancel();
-              }
-            }}
-          />
-          <p className="mt-1 text-[10px] text-muted-foreground">Enter 保存 · Esc 取消</p>
-        </div>
-      ) : (
-        <>
-          <div className="mt-1 text-xl font-semibold tabular-nums">{display}</div>
-          <p className="mt-1 text-[10px] text-muted-foreground">{hint}</p>
-        </>
-      )}
-    </div>
   );
 }

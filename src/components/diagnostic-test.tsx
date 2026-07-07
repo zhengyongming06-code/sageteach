@@ -274,14 +274,14 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
 
   if (phase === "pick-difficulty") {
     return (
-      <div className="space-y-6">
-        <header className="space-y-1">
-          <h2 className="text-xl font-semibold tracking-tight">选择诊断难度</h2>
-          <p className="text-sm text-muted-foreground">
+      <div className="wiki-prose-section !mt-4 space-y-5">
+        <header className="space-y-2">
+          <h1 className="wiki-page-title">选择诊断难度</h1>
+          <p className="wiki-prose-lead">
             当前：{grade} · 每轮抽 {DIAGNOSTIC_QUESTION_COUNT} 个知识点 · 先选难度，再选科目
           </p>
         </header>
-        <div className="space-y-3">
+        <div className="space-y-2">
           {DIAGNOSTIC_DIFFICULTY_UI.map((opt) => (
             <button
               key={opt.id}
@@ -290,13 +290,10 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
                 setDifficulty(opt.id);
                 setPhase("pick-subject");
               }}
-              className={cn(
-                "w-full rounded-2xl border border-border bg-card px-4 py-4 text-left transition",
-                "hover:border-primary/40 hover:bg-primary/5 active:scale-[0.99]",
-              )}
+              className="wiki-diagnostic-option"
             >
-              <p className="text-base font-semibold text-foreground">{opt.title}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{opt.description}</p>
+              <p className="text-base font-semibold text-[var(--wiki-heading)]">{opt.title}</p>
+              <p className="mt-1 text-sm text-[var(--wiki-nav-fg)]">{opt.description}</p>
             </button>
           ))}
         </div>
@@ -306,10 +303,10 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
 
   if (phase === "pick-subject") {
     return (
-      <div className="space-y-6">
-        <header className="space-y-1">
-          <h2 className="text-xl font-semibold tracking-tight">知识点诊断</h2>
-          <p className="text-sm text-muted-foreground">
+      <div className="wiki-prose-section !mt-4 space-y-5">
+        <header className="space-y-2">
+          <h1 className="wiki-page-title">选择科目</h1>
+          <p className="wiki-prose-lead">
             当前：{difficultyLabel ?? "—"} · {grade} · 每轮抽 {DIAGNOSTIC_QUESTION_COUNT} 个知识点
           </p>
         </header>
@@ -317,19 +314,19 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
         <button
           type="button"
           onClick={() => setPhase("pick-difficulty")}
-          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          className="wiki-link-text text-sm"
         >
           ← 更换难度
         </button>
 
         {justSavedSubject ? (
-          <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
+          <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
             「{justSavedSubject}」已保存。可继续选择其他科目诊断。
           </p>
         ) : null}
 
         {genError ? (
-          <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             {genError}
           </p>
         ) : null}
@@ -340,10 +337,7 @@ export function DiagnosticTest({ userId, onSaved }: DiagnosticTestProps) {
               key={s}
               type="button"
               onClick={() => startGeneration(s)}
-              className={cn(
-                "rounded-xl border border-border bg-card px-3 py-3 text-sm font-medium transition",
-                "hover:border-primary/40 hover:bg-primary/5 active:scale-[0.98]",
-              )}
+              className="wiki-diagnostic-subject"
             >
               {s}
             </button>

@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { DiagnosticTest } from "@/components/diagnostic-test";
 
@@ -14,15 +13,15 @@ function DiagnosticPage() {
   if (!user?.id) return null;
 
   return (
-    <div className="mx-auto max-w-lg space-y-4 pb-8">
-      <Link
-        to="/app/review"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft className="h-4 w-4" />
-        返回 Review
-      </Link>
-      <DiagnosticTest userId={user.id} />
+    <div className="wiki-page-wrap pb-10">
+      <article className="wiki-prose wiki-prose-sheet mx-auto max-w-2xl">
+        <nav className="wiki-breadcrumb" aria-label="面包屑">
+          <Link to="/app/today">首页</Link>
+          <span className="wiki-breadcrumb-sep">›</span>
+          <span className="text-[var(--wiki-nav-fg)]">知识点诊断</span>
+        </nav>
+        <DiagnosticTest userId={user.id} />
+      </article>
     </div>
   );
 }

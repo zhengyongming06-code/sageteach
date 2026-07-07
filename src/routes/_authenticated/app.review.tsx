@@ -1,9 +1,12 @@
-import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { z } from "zod";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { SUBJECTS, type Subject } from "@/lib/subjects";
+import { isSubjectSearch } from "@/lib/wiki-app-nav";
+import { createSafeStorage } from "@/lib/safe-storage";
 import { buildReviewDeepSeekSystemPrompt } from "@/lib/sage-system-prompt";
 import { filterCoachMessagesForSession } from "@/lib/review-session-messages";
 import { fetchUserExams, pickNearestExam } from "@/lib/user-exams";
@@ -31,13 +34,6 @@ import {
   SAGE_PHOTO_MESSAGE_MARKER,
   stripPhotoImagesFromMessages,
 } from "@/lib/review-photo-messages";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -58,7 +54,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Plus } from "lucide-react";
 import {
   ONBOARDING_REVIEW_SUBJECT,
   POST_FIRST_ONBOARDING_SESSION_CLOSING,
@@ -105,7 +101,26 @@ function coachRowsToChatMessages(rows: CoachMessageRow[]): SageChatMessage[] {
     }));
 }
 
-export const Route = createFileRoute("/_authenticated/app/review")({ component: Review });
+export const Route = createFileRoute("/_authenticated/app/review")({
+  validateSearch: (raw) => {
+    const parsed = z.object({ subject: z.string().optional() }).parse(raw);
+    return {
+      subject: isSubjectSearch(parsed.subject) ? parsed.subject : undefined,
+    };
+  },
+  component: Review,
+});
+
+const lastReviewSubjectStore = createSafeStorage(
+  typeof localStorage !== "undefined" ? localStorage : undefined,
+);
+const LAST_REVIEW_SUBJECT_KEY = "sage:last-review-subject";
+
+function resolveDefaultReviewSubject(): Subject {
+  const stored = lastReviewSubjectStore.getItem(LAST_REVIEW_SUBJECT_KEY);
+  if (isSubjectSearch(stored ?? undefined)) return stored;
+  return SUBJECTS[0];
+}
 
 function localYmd(d = new Date()) {
   const y = d.getFullYear();
@@ -114,13 +129,38 @@ function localYmd(d = new Date()) {
   return `${y}-${m}-${day}`;
 }
 
-function formatDateLabel(ymd: string) {
-  const [y, mo, da] = ymd.split("-").map(Number);
-  const d = new Date(y, mo - 1, da);
-  return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", weekday: "short" });
+/** e.g. 5月14日 20:30 — subject-scoped history list. */
+function formatSessionListLabel(sessionDate: string, startedAtIso: string) {
+  const [, mo, da] = sessionDate.split("-").map(Number);
+  return `${mo}月${da}日 ${formatSessionTime(startedAtIso)}`;
 }
 
-/** e.g. 5月14日 化学 14:30 — desktop sidebar / select (subject in label). */
+const SESSION_PREVIEW_MAX = 72;
+
+function truncateSessionPreview(text: string, max = SESSION_PREVIEW_MAX): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+function messagePreviewFromContent(content: string): string | null {
+  if (isPhotoOnlyMessageContent(content)) return "上传了题目图片";
+  let t = content;
+  if (t.includes(SAGE_PHOTO_MESSAGE_MARKER)) {
+    t = t.split(SAGE_PHOTO_MESSAGE_MARKER)[0]?.trim() ?? t;
+  }
+  t = t.replace(/\s+/g, " ").trim();
+  if (!t) return null;
+  return truncateSessionPreview(t);
+}
+
+function sessionListPreview(row: SessionRow): string {
+  if (row.weak_point?.trim()) return row.weak_point.trim();
+  if (row.message_preview?.trim()) return row.message_preview.trim();
+  return "复盘进行中，尚未生成小结";
+}
+
+/** e.g. 5月14日 化学 14:30 — mobile drawer / cross-subject lists. */
 function formatSessionSidebarLabel(sessionDate: string, subject: string, startedAtIso: string) {
   const [, mo, da] = sessionDate.split("-").map(Number);
   const time = formatSessionTime(startedAtIso);
@@ -143,6 +183,8 @@ type SessionRow = {
   session_date: string;
   subject: string;
   started_at: string;
+  weak_point?: string | null;
+  message_preview?: string | null;
 };
 
 const MOBILE_SUBJECT_TAG_STYLES: Record<string, { bg: string; color: string }> = {
@@ -184,8 +226,6 @@ function groupSessionsForDrawer(rows: SessionRow[]) {
   const labels = [...order.filter((l) => map.has(l)), ...dated];
   return labels.map((label) => ({ label, rows: map.get(label) ?? [] }));
 }
-
-type SidebarSessionFilter = "全部" | Subject;
 
 type SessionCardState =
   | null
@@ -243,10 +283,11 @@ function reviewScopeKey(subject: string, slug: string | null): string {
 
 function Review() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { subject: urlSubject } = Route.useSearch();
   const qc = useQueryClient();
   const [subject, setSubject] = useState<string>(SUBJECTS[0]);
   const [selectedDate, setSelectedDate] = useState(() => localYmd());
-  const [sidebarSessionFilter, setSidebarSessionFilter] = useState<SidebarSessionFilter>("全部");
   const chatPanelRef = useRef<SageChatPanelHandle>(null);
   const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
   const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
@@ -683,7 +724,7 @@ function Review() {
       try {
         const { data, error } = await supabase
           .from("coach_messages")
-          .select("review_session_slug,review_session_date,review_subject,created_at")
+          .select("review_session_slug,review_session_date,review_subject,created_at,role,content")
           .eq("user_id", user!.id)
           .not("review_session_date", "is", null)
           .not("review_subject", "is", null)
@@ -695,7 +736,14 @@ function Review() {
         }
         const byKey = new Map<
           string,
-          { session_slug: string; session_date: string; subject: string; started_at: string }
+          {
+            session_slug: string;
+            session_date: string;
+            subject: string;
+            started_at: string;
+            weak_point?: string | null;
+            message_preview?: string | null;
+          }
         >();
         const indexKey = (slug: string, subj: string) => `${slug}\0${subj}`;
         for (const row of data ?? []) {
@@ -711,10 +759,17 @@ function Review() {
           } else {
             byKey.set(k, { ...prev, session_date: d });
           }
+          if (row.role === "user" && row.content) {
+            const preview = messagePreviewFromContent(row.content);
+            if (preview) {
+              const entry = byKey.get(k);
+              if (entry) entry.message_preview = preview;
+            }
+          }
         }
         const { data: summaryRows, error: sumErr } = await supabase
           .from("review_summaries")
-          .select("review_session_slug,session_date,subject,created_at")
+          .select("review_session_slug,session_date,subject,created_at,weak_point")
           .eq("user_id", user!.id)
           .not("review_session_slug", "is", null);
         if (sumErr) {
@@ -731,6 +786,8 @@ function Review() {
               session_date: sum.session_date ?? prev?.session_date ?? localYmd(),
               subject: subj,
               started_at: prev?.started_at ?? sum.created_at,
+              weak_point: sum.weak_point,
+              message_preview: prev?.message_preview ?? null,
             });
           }
         }
@@ -770,9 +827,8 @@ function Review() {
   ]);
 
   const filteredSessionRows = useMemo(() => {
-    if (sidebarSessionFilter === "全部") return sessionIndex;
-    return sessionIndex.filter((s) => s.subject === sidebarSessionFilter);
-  }, [sessionIndex, sidebarSessionFilter]);
+    return sessionIndex.filter((s) => s.subject === chatSubject);
+  }, [sessionIndex, chatSubject]);
 
   const hasSessionForSelectedDate = useMemo(
     () => sessionIndex.some((s) => s.session_date === selectedDate && s.subject === chatSubject),
@@ -864,19 +920,29 @@ function Review() {
     ],
   );
 
-  const mobileSessionOptions = useMemo(() => {
-    const rows = sessionIndex.filter((s) => s.subject === chatSubject);
-    rows.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
-    return rows;
-  }, [sessionIndex, chatSubject]);
+  useEffect(() => {
+    if (onboardingIncomplete || urlSubject) return;
+    const fallback = resolveDefaultReviewSubject();
+    void navigate({ to: "/app/review", search: { subject: fallback }, replace: true });
+  }, [urlSubject, onboardingIncomplete, navigate]);
 
-  const dateOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of sessionIndex) set.add(s.session_date);
-    set.add(localYmd());
-    set.add(selectedDate);
-    return [...set].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
-  }, [sessionIndex, selectedDate]);
+  useEffect(() => {
+    if (onboardingIncomplete || !urlSubject || urlSubject === subject) return;
+    switchSubject(urlSubject);
+  }, [urlSubject, onboardingIncomplete, subject, switchSubject]);
+
+  useEffect(() => {
+    if (!urlSubject || onboardingIncomplete) return;
+    lastReviewSubjectStore.setItem(LAST_REVIEW_SUBJECT_KEY, urlSubject);
+  }, [urlSubject, onboardingIncomplete]);
+
+  const pickReviewSubject = useCallback(
+    (next: Subject) => {
+      lastReviewSubjectStore.setItem(LAST_REVIEW_SUBJECT_KEY, next);
+      void navigate({ to: "/app/review", search: { subject: next } });
+    },
+    [navigate],
+  );
 
   const drawerSessionGroups = useMemo(
     () => groupSessionsForDrawer(sessionIndex),
@@ -1673,6 +1739,9 @@ function Review() {
     setDrawerOpen(false);
   };
 
+  const isTodaySessionActive =
+    selectedDate === localYmd() && !!activeSessionSlug && !onboardingIncomplete;
+
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   if (pathname === "/app/review/archive") {
     return <Outlet />;
@@ -1715,13 +1784,9 @@ function Review() {
               <button
                 key={s}
                 type="button"
-                onClick={() => switchSubject(s)}
-                className={cn(
-                  "shrink-0 rounded-[20px] border px-[14px] py-[5px] text-xs font-medium leading-none transition",
-                  subject === s
-                    ? "border-[#1a1a2e] bg-[#1a1a2e] text-white"
-                    : "border-border bg-white text-muted-foreground",
-                )}
+                onClick={() => pickReviewSubject(s)}
+                data-active={subject === s}
+                className="wiki-chip wiki-chip--pill"
               >
                 {s}
               </button>
@@ -1756,6 +1821,27 @@ function Review() {
               ×
             </button>
           </div>
+          {!onboardingIncomplete ? (
+            <div className="shrink-0 border-b border-border px-4 py-3">
+              <button
+                type="button"
+                onClick={() => {
+                  void startTodaySession();
+                  setDrawerOpen(false);
+                }}
+                data-active={isTodaySessionActive}
+                className="wiki-session-today-btn"
+              >
+                <span className="wiki-session-today-title">
+                  <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                  开始今天的复盘
+                </span>
+                <span className="wiki-session-today-meta">
+                  {localYmd()} · {chatSubject}
+                </span>
+              </button>
+            </div>
+          ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]">
             {drawerSessionGroups.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted-foreground">暂无复盘记录</p>
@@ -1793,6 +1879,9 @@ function Review() {
                             <p className="mt-1.5 text-sm tabular-nums text-muted-foreground">
                               {formatSessionDateTimeLabel(row.session_date, row.started_at)}
                             </p>
+                            <p className="mt-1 line-clamp-2 text-sm text-[var(--wiki-nav-fg)]">
+                              {sessionListPreview(row)}
+                            </p>
                           </button>
                         </li>
                       );
@@ -1807,17 +1896,26 @@ function Review() {
 
       <div className="hidden h-full min-h-0 flex-1 flex-col overflow-hidden lg:flex">
       <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 pt-4 md:px-5">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Review</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            选一科，和 Sage 聊聊今天哪里卡住——用问题把模糊变成具体。
+        <div className="min-w-0 flex-1">
+          <nav className="wiki-breadcrumb" aria-label="面包屑">
+            <Link to="/app/today">首页</Link>
+            <span className="wiki-breadcrumb-sep">›</span>
+            <span className="text-[var(--wiki-nav-fg)]">复盘</span>
+          </nav>
+          <h1 className="wiki-page-title mt-2">
+            {onboardingIncomplete ? "学科复盘" : `复盘 · ${chatSubject}`}
+          </h1>
+          <p className="mt-1 text-sm text-[var(--wiki-muted)]">
+            {onboardingIncomplete
+              ? `首次复盘使用「${ONBOARDING_REVIEW_SUBJECT}」引导；完成后在侧边栏选择科目。`
+              : "侧边栏切换科目；左侧选历史会话，或开始今天的复盘。"}
           </p>
         </div>
         <Link
           to="/app/review/archive"
-          className="shrink-0 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          className="shrink-0 text-sm font-medium text-[var(--wiki-link)] underline-offset-4 hover:underline"
         >
-          查看我的弱点档案
+          查看弱点档案
         </Link>
       </header>
 
@@ -1827,28 +1925,34 @@ function Review() {
           "lg:flex-row lg:items-stretch",
         )}
       >
-        <aside className="hidden lg:block lg:w-56 lg:shrink-0 lg:border-r lg:border-border lg:pr-5">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Sessions
+        <aside className="hidden min-h-0 lg:flex lg:w-60 lg:shrink-0 lg:flex-col lg:border-r lg:border-border lg:pr-4">
+          <p className="mb-2 wiki-field-label">
+            {chatSubject} · 历史
+            {filteredSessionRows.length > 0 ? (
+              <span className="ml-1 font-normal normal-case text-[var(--wiki-muted)]">
+                ({filteredSessionRows.length})
+              </span>
+            ) : null}
           </p>
-          <div className="mb-2 flex max-h-24 flex-wrap gap-1 overflow-y-auto lg:max-h-none">
-            {(["全部", ...SUBJECTS] as SidebarSessionFilter[]).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setSidebarSessionFilter(tab)}
-                className={cn(
-                  "shrink-0 rounded-md px-2 py-1 text-[11px] font-medium transition",
-                  sidebarSessionFilter === tab
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted/80 text-muted-foreground hover:bg-muted",
-                )}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-          <ul className="max-h-40 space-y-1 overflow-y-auto lg:max-h-[min(380px,50vh)]">
+
+          {!onboardingIncomplete ? (
+            <button
+              type="button"
+              onClick={() => void startTodaySession()}
+              data-active={isTodaySessionActive}
+              className="wiki-session-today-btn"
+            >
+              <span className="wiki-session-today-title">
+                <Plus className="h-4 w-4 shrink-0" aria-hidden />
+                开始今天的复盘
+              </span>
+              <span className="wiki-session-today-meta">
+                {localYmd()} · {chatSubject}
+              </span>
+            </button>
+          ) : null}
+
+          <ul className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
             {filteredSessionRows.map((s) => {
               const rowActive = activeSessionSlug === s.session_slug;
               return (
@@ -1856,24 +1960,13 @@ function Review() {
                   <button
                     type="button"
                     onClick={() => loadSessionFromPicker(s)}
-                    className={cn(
-                      "min-w-0 flex-1 rounded-lg px-2.5 py-2 text-left text-sm transition",
-                      rowActive
-                        ? "bg-primary/10 font-medium text-primary"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
+                    data-active={rowActive}
+                    className="wiki-session-btn"
                   >
-                    <span className="block text-foreground">
-                      {formatSessionSidebarLabel(s.session_date, s.subject, s.started_at)}
+                    <span className="block">
+                      {formatSessionListLabel(s.session_date, s.started_at)}
                     </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] tabular-nums text-muted-foreground">
-                      <span>{s.session_date}</span>
-                      {sidebarSessionFilter === "全部" ? (
-                        <span className="rounded border border-border bg-card px-1 py-px text-[10px] text-foreground/80">
-                          {s.subject}
-                        </span>
-                      ) : null}
-                    </span>
+                    <span className="wiki-session-preview">{sessionListPreview(s)}</span>
                   </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -1898,110 +1991,21 @@ function Review() {
               );
             })}
             {filteredSessionRows.length === 0 && (
-              <li className="px-2.5 py-2 text-sm text-muted-foreground">
+              <li className="px-2.5 py-2 text-sm text-[var(--wiki-muted)]">
                 {sessionIndex.length === 0
-                  ? "暂无记录，从下面「今天」开始。"
-                  : "该科目下暂无会话。"}
+                  ? "暂无记录，从下方「今天」开始。"
+                  : `${chatSubject} 还没有复盘记录。`}
               </li>
             )}
           </ul>
-          <button
-            type="button"
-            onClick={() => void startTodaySession()}
-            className={cn(
-              "mt-2 w-full rounded-lg border border-dashed border-border px-2.5 py-2 text-left text-sm transition hover:bg-muted",
-              selectedDate === localYmd() && activeSessionSlug && "border-primary/40 bg-primary/5",
-            )}
-          >
-            + 今天 · {localYmd()}
-          </button>
         </aside>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="shrink-0 space-y-3">
-          <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">科目</p>
-            {onboardingIncomplete ? (
-              <p className="text-sm text-muted-foreground">
-                首次复盘使用「{ONBOARDING_REVIEW_SUBJECT}」引导；完成后即可按科目复盘。
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {SUBJECTS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => switchSubject(s)}
-                    className={cn(
-                      "rounded-xl border px-3.5 py-2 text-sm font-medium transition",
-                      subject === s
-                        ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                        : "border-border bg-card text-foreground hover:border-ring/50",
-                    )}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="hidden lg:block">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">
-              {mobileSessionOptions.length > 0 ? "复盘场次" : "复盘日期"}
+          {!onboardingIncomplete && !hasSessionForSelectedDate && messages.length === 0 ? (
+            <p className="mb-2 shrink-0 text-xs text-[var(--wiki-muted)]">
+              新会话；发第一条消息后，会出现在左侧历史列表。
             </p>
-            {mobileSessionOptions.length > 0 ? (
-              <Select
-                value={activeSessionSlug ?? "__none__"}
-                onValueChange={(v) => {
-                  if (v === "__none__") return;
-                  const row = mobileSessionOptions.find((r) => r.session_slug === v);
-                  if (!row) return;
-                  loadSessionFromPicker(row);
-                }}
-              >
-                <SelectTrigger className="rounded-xl border-border bg-card">
-                  <SelectValue placeholder="选择场次" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__" disabled>
-                    选择场次
-                  </SelectItem>
-                  {mobileSessionOptions.map((s) => (
-                    <SelectItem key={s.session_slug} value={s.session_slug}>
-                      {formatSessionSidebarLabel(s.session_date, s.subject, s.started_at)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Select
-                value={selectedDate}
-                onValueChange={(d) => {
-                  resetChatUiForScopeChange();
-                  handleSubjectChange(subject, null, d);
-                }}
-              >
-                <SelectTrigger className="rounded-xl border-border bg-card">
-                  <SelectValue placeholder="选择日期" />
-                </SelectTrigger>
-                <SelectContent>
-                  {dateOptions.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {formatDateLabel(d)} · {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {!onboardingIncomplete && !hasSessionForSelectedDate && messages.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              这是新会话；发第一条消息后，该日期会出现在左侧列表。
-            </p>
-          )}
-          </div>
+          ) : null}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {renderChatPanel("default")}

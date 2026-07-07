@@ -1,11 +1,10 @@
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Brain, Check, ChevronRight, Target } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { subjectAccentCardClass } from "@/lib/subject-accent";
+import { subjectAccentPillClass, subjectAccentTaskClass } from "@/lib/subject-accent";
+import type { TodayTocSection } from "@/components/today-page-rail";
 import {
   fetchDailyTraining,
   knowledgeTrackingQueryKeys,
@@ -19,13 +18,13 @@ import {
 } from "@/lib/knowledge-tracking/ingest-client";
 import { recordProductAnalyticsEvent } from "@/lib/analytics/api";
 import type { DailyTrainingItem } from "@/lib/knowledge-tracking/types";
-import { KNOWLEDGE_POINT_STATUS_DOT_CLASS, type KnowledgePointStatus } from "@/lib/knowledge-points";
 
 type KnowledgeTodayPanelProps = {
   userId: string;
+  onTocChange?: (sections: TodayTocSection[]) => void;
 };
 
-export function KnowledgeTodayPanel({ userId }: KnowledgeTodayPanelProps) {
+export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanelProps) {
   const qc = useQueryClient();
   const today = knowledgeLocalYmd();
 
@@ -66,37 +65,38 @@ export function KnowledgeTodayPanel({ userId }: KnowledgeTodayPanelProps) {
 
   const hasContent = training.length > 0 || weakPoints.length > 0 || patterns.length > 0;
 
+  useEffect(() => {
+    if (!onTocChange) return;
+    const sections: TodayTocSection[] = [];
+    if (training.length > 0) sections.push({ id: "training", label: "今日训练" });
+    if (weakPoints.length > 0) sections.push({ id: "mastery", label: "薄弱知识点" });
+    if (patterns.length > 0) sections.push({ id: "patterns", label: "错误模式" });
+    onTocChange(sections);
+  }, [training.length, weakPoints.length, patterns.length, onTocChange]);
+
   if (!hasContent && !trainingLoading) {
     return (
-      <section className="shrink-0 rounded-3xl border border-dashed border-border bg-card/60 p-4 shadow-sm">
-        <div className="flex items-start gap-3">
-          <Brain className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-          <div>
-            <h2 className="text-sm font-semibold tracking-tight">知识状态追踪</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              在复盘里拍照搜题后，Sage 会自动提取知识点、记录错题，并在这里推荐今日训练。
-            </p>
-            <Button asChild variant="outline" size="sm" className="mt-3 rounded-xl">
-              <Link to="/app/review">去拍照搜题</Link>
-            </Button>
-          </div>
+      <section className="wiki-prose-section">
+        <div className="wiki-callout">
+          <h2 className="wiki-prose-h2 !mb-2 !text-base">知识状态追踪</h2>
+          <p className="wiki-prose-sub">
+            在复盘里拍照搜题后，Sage 会自动提取知识点、记录错题，并在这里推荐今日训练。
+          </p>
+          <Link to="/app/review" className="wiki-link-text mt-3 inline-block">
+            去拍照搜题 →
+          </Link>
         </div>
       </section>
     );
   }
 
   return (
-    <section className="shrink-0 space-y-4">
+    <>
       {training.length > 0 ? (
-        <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Target className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">今日训练</h2>
-            </div>
-            <span className="text-xs text-muted-foreground">基于掌握度自动生成</span>
-          </div>
-          <ul className="mt-3 space-y-2">
+        <section id="training" className="wiki-prose-section">
+          <h2 className="wiki-prose-h2">今日训练</h2>
+          <p className="wiki-prose-lead">基于掌握度自动生成</p>
+          <ul className="wiki-prose-list">
             {training.map((item, i) => (
               <TrainingRow
                 key={item.id ?? `${item.subject}-${item.knowledge_point}-${i}`}
@@ -106,60 +106,47 @@ export function KnowledgeTodayPanel({ userId }: KnowledgeTodayPanelProps) {
               />
             ))}
           </ul>
-        </div>
+        </section>
       ) : null}
 
       {weakPoints.length > 0 ? (
-        <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
-          <h2 className="text-sm font-semibold">薄弱知识点</h2>
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {weakPoints.map((kp: { subject: string; name: string; status?: string; mastery_score?: number | null }) => (
-              <li
-                key={`${kp.subject}-${kp.name}`}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs",
-                  subjectAccentCardClass(kp.subject as string),
-                )}
-              >
-                <span
-                  className={cn(
-                    "h-2 w-2 rounded-full",
-                    KNOWLEDGE_POINT_STATUS_DOT_CLASS[(kp.status as KnowledgePointStatus) ?? "薄弱"],
-                  )}
-                />
-                <span className="font-medium">{kp.subject}</span>
-                <span className="text-muted-foreground">·</span>
-                <span>{kp.name}</span>
+        <section id="mastery" className="wiki-prose-section">
+          <h2 className="wiki-prose-h2">薄弱知识点</h2>
+          <div className="wiki-tags mt-2">
+            {weakPoints.map((kp: { subject: string; name: string; mastery_score?: number | null }) => (
+              <span key={`${kp.subject}-${kp.name}`} className={subjectAccentPillClass(kp.subject)}>
+                {kp.subject} · {kp.name}
                 {typeof kp.mastery_score === "number" ? (
-                  <span className="tabular-nums text-muted-foreground">{Math.round(kp.mastery_score)}</span>
+                  <span className="tabular-nums opacity-70"> {Math.round(kp.mastery_score)}</span>
                 ) : null}
-              </li>
+              </span>
             ))}
-          </ul>
-        </div>
+          </div>
+        </section>
       ) : null}
 
       {patterns.length > 0 ? (
-        <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
-          <h2 className="text-sm font-semibold">错误模式</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">跨多次错题归纳，不是单题记录</p>
-          <ul className="mt-3 space-y-2">
+        <section id="patterns" className="wiki-prose-section">
+          <h2 className="wiki-prose-h2">错误模式</h2>
+          <p className="wiki-prose-lead">跨多次错题归纳，不是单题记录</p>
+          <ul className="wiki-prose-list">
             {patterns.map((p: { subject: string; label: string; occurrence_count: number }) => (
-              <li
-                key={`${p.subject}-${p.label}`}
-                className="rounded-xl border border-border/80 bg-muted/20 px-3 py-2 text-sm"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium">{p.label}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">×{p.occurrence_count}</span>
+              <li key={`${p.subject}-${p.label}`} className="wiki-prose-row">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium leading-snug text-[var(--wiki-fg)]">{p.label}</p>
+                    <p className="mt-0.5 wiki-prose-sub text-xs">{p.subject}</p>
+                  </div>
+                  <span className="shrink-0 wiki-prose-sub text-xs tabular-nums">
+                    ×{p.occurrence_count}
+                  </span>
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">{p.subject}</p>
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -174,49 +161,49 @@ function TrainingRow({
 }) {
   const done = item.status === "done";
   return (
-    <li
-      className={cn(
-        "flex items-start gap-3 rounded-2xl border border-border px-3 py-2.5",
-        subjectAccentCardClass(item.subject),
-        done && "opacity-60",
-      )}
-    >
-      <Checkbox
-        checked={done}
-        disabled={done || busy}
-        onCheckedChange={(v) => v === true && onDone()}
-        className="mt-0.5"
-        aria-label={`完成训练：${item.knowledge_point}`}
-      />
-      <div className="min-w-0 flex-1">
-        <p className={cn("text-sm font-medium", done && "line-through")}>
-          {item.subject} · {item.knowledge_point}
-        </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{item.reason}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {item.task_type} · 约 {item.estimated_minutes} 分钟
-        </p>
+    <li className={cn(subjectAccentTaskClass(item.subject), done && "opacity-60")}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-sm font-medium text-[var(--wiki-fg)]", done && "line-through")}>
+            {item.subject} · {item.knowledge_point}
+          </p>
+          <p className="mt-0.5 wiki-prose-sub text-xs">{item.reason}</p>
+          <p className="mt-0.5 wiki-prose-sub text-xs">
+            {item.task_type} · 约 {item.estimated_minutes} 分钟
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {!done ? (
+            <>
+              <button
+                type="button"
+                className="wiki-inline-action"
+                disabled={busy}
+                onClick={onDone}
+              >
+                标记完成
+              </button>
+              <Link
+                to="/app/review"
+                className="wiki-link-text text-xs"
+                onClick={() => {
+                  void recordProductAnalyticsEvent("training_go_click", {
+                    subject: item.subject,
+                    task_type: item.task_type,
+                    knowledge_point: item.knowledge_point,
+                    label: `${item.task_type} · ${item.knowledge_point}`,
+                  });
+                }}
+              >
+                去练
+                <ChevronRight className="ml-0.5 inline h-3 w-3" />
+              </Link>
+            </>
+          ) : (
+            <span className="wiki-prose-sub text-xs">已完成</span>
+          )}
+        </div>
       </div>
-      {!done ? (
-        <Button asChild variant="ghost" size="sm" className="shrink-0 rounded-lg px-2">
-          <Link
-            to="/app/review"
-            onClick={() => {
-              void recordProductAnalyticsEvent("training_go_click", {
-                subject: item.subject,
-                task_type: item.task_type,
-                knowledge_point: item.knowledge_point,
-                label: `${item.task_type} · ${item.knowledge_point}`,
-              });
-            }}
-          >
-            去练
-            <ChevronRight className="ml-0.5 h-3.5 w-3.5" />
-          </Link>
-        </Button>
-      ) : (
-        <Check className="mt-1 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
-      )}
     </li>
   );
 }
