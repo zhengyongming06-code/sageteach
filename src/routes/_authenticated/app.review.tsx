@@ -155,9 +155,10 @@ function messagePreviewFromContent(content: string): string | null {
 }
 
 function sessionListPreview(row: SessionRow): string {
+  if (row.tonight_task?.trim()) return row.tonight_task.trim();
   if (row.weak_point?.trim()) return row.weak_point.trim();
   if (row.message_preview?.trim()) return row.message_preview.trim();
-  return "复盘进行中，尚未生成小结";
+  return "复盘进行中，尚未整理今晚任务";
 }
 
 /** e.g. 5月14日 化学 14:30 — mobile drawer / cross-subject lists. */
@@ -184,6 +185,7 @@ type SessionRow = {
   subject: string;
   started_at: string;
   weak_point?: string | null;
+  tonight_task?: string | null;
   message_preview?: string | null;
 };
 
@@ -293,6 +295,7 @@ function Review() {
   const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
   const [photoAnalysisLoading, setPhotoAnalysisLoading] = useState(false);
   const [messages, setMessages] = useState<SageChatMessage[]>([]);
+  const [chatScopeKey, setChatScopeKey] = useState(() => reviewScopeKey(SUBJECTS[0], null));
   const [subjectChatLoading, setSubjectChatLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [streamAssistantText, setStreamAssistantText] = useState<string | null>(null);
@@ -329,6 +332,8 @@ function Review() {
   const chatsBySubject = useRef<Record<string, SubjectChatCache>>(createChatsBySubject());
   /** messages 与 summary 共用：切换科目/场次时第一步更新，异步写入前必须校验。 */
   const activeKeyRef = useRef(reviewScopeKey(subject, null));
+  /** Bumped on scope change so in-flight loadHistory calls cannot repopulate stale chat. */
+  const historyLoadSeqRef = useRef(0);
 
   /** When true, DB rows must not repopulate chat (e.g. after「结束复盘」). */
   const suppressChatMessagesSyncRef = useRef(false);
@@ -340,7 +345,15 @@ function Review() {
     setActiveSessionSlugState(slug);
   }, []);
 
-  /** 异步拉取历史；仅在 activeKeyRef 仍指向 targetKey 时写入 messages。 */
+  const beginReviewScope = useCallback((newSubject: string, slug: string | null) => {
+    historyLoadSeqRef.current += 1;
+    const newKey = reviewScopeKey(newSubject, slug);
+    activeKeyRef.current = newKey;
+    setChatScopeKey(newKey);
+    return newKey;
+  }, []);
+
+  /** 异步拉取历史；仅在 scope 未变时写入 messages。 */
   const loadHistory = useCallback(
     async (targetSubject: string, targetSlug: string | null) => {
       if (!user?.id || !targetSlug || suppressChatMessagesSyncRef.current) {
@@ -349,6 +362,7 @@ function Review() {
         return;
       }
       const targetKey = reviewScopeKey(targetSubject, targetSlug);
+      const loadSeq = historyLoadSeqRef.current;
       setSubjectChatLoading(true);
       setHistoryFetching(true);
       try {
@@ -360,7 +374,7 @@ function Review() {
           .eq("review_subject", targetSubject)
           .in("role", ["user", "assistant"])
           .order("created_at", { ascending: true });
-        if (activeKeyRef.current !== targetKey) return;
+        if (loadSeq !== historyLoadSeqRef.current || activeKeyRef.current !== targetKey) return;
         if (error) {
           console.warn("[review-messages] loadHistory", error);
           return;
@@ -382,7 +396,7 @@ function Review() {
       } catch (e) {
         console.warn("[review-messages] loadHistory", e);
       } finally {
-        if (activeKeyRef.current === targetKey) {
+        if (loadSeq === historyLoadSeqRef.current && activeKeyRef.current === targetKey) {
           setSubjectChatLoading(false);
           setHistoryFetching(false);
         }
@@ -507,11 +521,10 @@ function Review() {
     [user?.id, pinSummaryCardScope],
   );
 
-  /** 切换科目/场次：第一步更新 activeKeyRef，同步清空 messages/summary，再异步加载。 */
+  /** 切换科目/场次：同步更新 scope，清空或加载 messages/summary。 */
   const handleSubjectChange = useCallback(
     (newSubject: string, slug: string | null, date: string) => {
-      const newKey = reviewScopeKey(newSubject, slug);
-      activeKeyRef.current = newKey;
+      beginReviewScope(newSubject, slug);
       setMessages([]);
       setSessionCard(null);
       clearSubjectScopedUi();
@@ -522,6 +535,7 @@ function Review() {
       void loadExistingSummary(newSubject, slug, date);
     },
     [
+      beginReviewScope,
       clearSubjectScopedUi,
       applyActiveSessionSlug,
       loadHistory,
@@ -590,13 +604,13 @@ function Review() {
     if (profileFlags?.needsGuidedReviewOnboarding === true) {
       applyActiveSessionSlug(null);
       const sub = ONBOARDING_REVIEW_SUBJECT;
-      activeKeyRef.current = reviewScopeKey(sub, null);
+      beginReviewScope(sub, null);
       setMessages([]);
       setSessionCard(null);
       setSubject(sub);
       setSelectedDate(localYmd());
     }
-  }, [profileFlagsReady, profileFlags?.needsGuidedReviewOnboarding, applyActiveSessionSlug]);
+  }, [profileFlagsReady, profileFlags?.needsGuidedReviewOnboarding, applyActiveSessionSlug, beginReviewScope]);
 
   const prevSubjectForScopeRef = useRef(subject);
 
@@ -742,6 +756,7 @@ function Review() {
             subject: string;
             started_at: string;
             weak_point?: string | null;
+            tonight_task?: string | null;
             message_preview?: string | null;
           }
         >();
@@ -769,7 +784,7 @@ function Review() {
         }
         const { data: summaryRows, error: sumErr } = await supabase
           .from("review_summaries")
-          .select("review_session_slug,session_date,subject,created_at,weak_point")
+          .select("review_session_slug,session_date,subject,created_at,weak_point,tonight_task")
           .eq("user_id", user!.id)
           .not("review_session_slug", "is", null);
         if (sumErr) {
@@ -787,6 +802,7 @@ function Review() {
               subject: subj,
               started_at: prev?.started_at ?? sum.created_at,
               weak_point: sum.weak_point,
+              tonight_task: sum.tonight_task,
               message_preview: prev?.message_preview ?? null,
             });
           }
@@ -801,59 +817,7 @@ function Review() {
     },
   });
 
-  const initialSlugHydratedRef = useRef(false);
-  useEffect(() => {
-    if (onboardingIncomplete || initialSlugHydratedRef.current || activeSessionSlug) return;
-    const cached = chatsBySubject.current[subject];
-    let slug = cached?.activeSessionSlug ?? null;
-    let date = cached?.selectedDate ?? localYmd();
-    if (!slug) {
-      const latest = sessionIndex.find((s) => s.subject === chatSubject);
-      if (latest) {
-        slug = latest.session_slug;
-        date = latest.session_date;
-      }
-    }
-    if (!slug) return;
-    initialSlugHydratedRef.current = true;
-    handleSubjectChange(chatSubject, slug, date);
-  }, [
-    sessionIndex,
-    chatSubject,
-    subject,
-    onboardingIncomplete,
-    activeSessionSlug,
-    handleSubjectChange,
-  ]);
-
-  const filteredSessionRows = useMemo(() => {
-    return sessionIndex.filter((s) => s.subject === chatSubject);
-  }, [sessionIndex, chatSubject]);
-
-  const hasSessionForSelectedDate = useMemo(
-    () => sessionIndex.some((s) => s.session_date === selectedDate && s.subject === chatSubject),
-    [sessionIndex, selectedDate, chatSubject],
-  );
-
-  const showHistorySkeleton = subjectChatLoading || historyFetching;
-
-  const userMessageCount = useMemo(
-    () => messageRows.filter((m) => m.role === "user").length,
-    [messageRows],
-  );
-
-  useEffect(() => {
-    if (onboardingIncomplete) return;
-    chatsBySubject.current[subject] = {
-      messages: stripPhotoImagesFromMessages(messages),
-      messageRows,
-      activeSessionSlug,
-      selectedDate,
-      sessionCard,
-    };
-  }, [messages, messageRows, activeSessionSlug, selectedDate, subject, onboardingIncomplete, sessionCard]);
-
-  /** Save current subject chat, restore cached session/messages for the next subject. */
+  /** Save current subject chat, restore in-memory session for the next subject (no auto-load from DB). */
   const switchSubject = useCallback(
     (nextSubject: string) => {
       if (onboardingIncomplete || nextSubject === subject) return;
@@ -891,19 +855,25 @@ function Review() {
       }
 
       const cached = chatsBySubject.current[nextSubject] ?? emptySubjectChatCache();
-      let slug = cached.activeSessionSlug;
-      let date = cached.selectedDate;
-      if (!slug) {
-        const latest = sessionIndex.find((s) => s.subject === nextSubject);
-        if (latest) {
-          slug = latest.session_slug;
-          date = latest.session_date;
-        }
-      }
+      const slug = cached.activeSessionSlug;
+      const date = cached.selectedDate;
 
       skipSubjectScopeEffectRef.current = true;
       resetChatUiForScopeChange();
-      handleSubjectChange(nextSubject, slug, date);
+      beginReviewScope(nextSubject, slug);
+      setMessages(cached.messages);
+      setMessageRows(cached.messageRows);
+      setSessionCard(cached.sessionCard);
+      setSubject(nextSubject);
+      setSelectedDate(date);
+      applyActiveSessionSlug(slug);
+      setSubjectChatLoading(false);
+      setHistoryFetching(false);
+
+      if (slug && cached.messages.length === 0 && !suppressChatMessagesSyncRef.current) {
+        void loadHistory(nextSubject, slug);
+      }
+      if (slug) void loadExistingSummary(nextSubject, slug, date);
     },
     [
       subject,
@@ -912,13 +882,43 @@ function Review() {
       activeSessionSlug,
       selectedDate,
       sessionCard,
-      sessionIndex,
       handleSubjectChange,
       resetChatUiForScopeChange,
+      beginReviewScope,
       onboardingIncomplete,
       subjectsWithEndedReview,
+      applyActiveSessionSlug,
+      loadHistory,
+      loadExistingSummary,
     ],
   );
+
+  const filteredSessionRows = useMemo(() => {
+    return sessionIndex.filter((s) => s.subject === chatSubject);
+  }, [sessionIndex, chatSubject]);
+
+  const hasSessionForSelectedDate = useMemo(
+    () => sessionIndex.some((s) => s.session_date === selectedDate && s.subject === chatSubject),
+    [sessionIndex, selectedDate, chatSubject],
+  );
+
+  const showHistorySkeleton = subjectChatLoading || historyFetching;
+
+  const userMessageCount = useMemo(
+    () => messageRows.filter((m) => m.role === "user").length,
+    [messageRows],
+  );
+
+  useEffect(() => {
+    if (onboardingIncomplete) return;
+    chatsBySubject.current[subject] = {
+      messages: stripPhotoImagesFromMessages(messages),
+      messageRows,
+      activeSessionSlug,
+      selectedDate,
+      sessionCard,
+    };
+  }, [messages, messageRows, activeSessionSlug, selectedDate, subject, onboardingIncomplete, sessionCard]);
 
   useEffect(() => {
     if (onboardingIncomplete || urlSubject) return;
@@ -1235,7 +1235,7 @@ function Review() {
       sessionSlug = crypto.randomUUID();
       slugNavSourceRef.current = "plus";
       applyActiveSessionSlug(sessionSlug);
-      activeKeyRef.current = reviewScopeKey(scopeSubject, sessionSlug);
+      beginReviewScope(scopeSubject, sessionSlug);
     }
     const targetKey = reviewScopeKey(scopeSubject, sessionSlug);
     const scopeStale = () => activeKeyRef.current !== targetKey;
@@ -1510,6 +1510,7 @@ function Review() {
     subjectsWithEndedReview,
     handleClearImage,
     loadHistory,
+    beginReviewScope,
   ]);
 
   const prefetchSummary = useCallback(() => {
@@ -1693,7 +1694,7 @@ function Review() {
   const renderChatPanel = (layout: "default" | "mobile") => (
     <SageChatPanel
       ref={chatPanelRef}
-      key={chatSubject}
+      key={`${layout}-${chatScopeKey}`}
       layout={layout}
       messages={messages}
       onSubmit={(text) => void send(text)}
@@ -1726,7 +1727,7 @@ function Review() {
             disabled={isSummarySubmitting}
             onClick={onEndReviewClick}
           >
-            {isSummarySubmitting ? "生成中..." : "结束复盘"}
+            {isSummarySubmitting ? "整理中…" : "整理今晚任务"}
           </Button>
         ) : null
       }
@@ -1770,10 +1771,11 @@ function Review() {
               诊断
             </Link>
             <Link
-              to="/app/review/archive"
+              to="/app/today"
+              hash="archive"
               className="text-xs text-muted-foreground underline-offset-2 hover:underline"
             >
-              弱点档案
+              今晚任务
             </Link>
           </div>
         </div>
@@ -1912,10 +1914,11 @@ function Review() {
           </p>
         </div>
         <Link
-          to="/app/review/archive"
+          to="/app/today"
+          hash="archive"
           className="shrink-0 text-sm font-medium text-[var(--wiki-link)] underline-offset-4 hover:underline"
         >
-          查看弱点档案
+          查看今晚任务
         </Link>
       </header>
 

@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
@@ -9,11 +9,23 @@ import { AuthLayout } from "@/components/auth-layout";
 export const Route = createFileRoute("/login")({ component: Login });
 
 function Login() {
-  const { signIn } = useAuth();
+  const { signIn, session, loading } = useAuth();
   const nav = useNavigate();
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loadingSubmit, setLoadingSubmit] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      </div>
+    );
+  }
+
+  if (session) {
+    return <Navigate to="/app/today" replace />;
+  }
 
   return (
     <AuthLayout
@@ -32,14 +44,14 @@ function Login() {
         className="space-y-3"
         onSubmit={async (e) => {
           e.preventDefault();
-          setLoading(true);
+          setLoadingSubmit(true);
           try {
             await signIn(email, pw);
             nav({ to: "/app/today" });
           } catch (err) {
             toast.error((err as Error).message);
           } finally {
-            setLoading(false);
+            setLoadingSubmit(false);
           }
         }}
       >
@@ -72,10 +84,10 @@ function Login() {
         </div>
         <Button
           type="submit"
-          disabled={loading}
+          disabled={loadingSubmit}
           className="h-12 w-full sy-button sy-button-primary !min-h-12"
         >
-          {loading ? "登录中…" : "登录"}
+          {loadingSubmit ? "登录中…" : "登录"}
         </Button>
       </form>
     </AuthLayout>

@@ -1,158 +1,90 @@
-import { useState } from "react";
 import { cn } from "@/lib/utils";
-
-function defaultSummaryExpanded() {
-  if (typeof window === "undefined") return false;
-  return window.innerWidth >= 768;
-}
 
 export type ReviewSummaryCardProps = {
   variant?: "full" | "skeleton" | "streaming";
   subject?: string;
   weakPoint?: string;
   tonightTask?: string;
+  /** Kept for API compat; no longer shown in the simplified card. */
   followUp?: string;
   mastered?: string | null;
   className?: string;
 };
-
-function SummaryLine({
-  label,
-  value,
-  loading,
-}: {
-  label: string;
-  value?: string;
-  loading?: boolean;
-}) {
-  if (loading) {
-    return (
-      <li className="space-y-1.5">
-        <span className="text-muted-foreground">{label}</span>
-        <div className="h-4 w-[92%] max-w-md animate-pulse rounded-md bg-muted/70" />
-      </li>
-    );
-  }
-  if (!value) return null;
-  return (
-    <li>
-      <span className="text-muted-foreground">{label}</span>
-      {value}
-    </li>
-  );
-}
 
 export function ReviewSummaryCard({
   variant = "full",
   subject,
   weakPoint,
   tonightTask,
-  followUp,
   mastered,
   className,
 }: ReviewSummaryCardProps) {
-  const [isExpanded, setIsExpanded] = useState(defaultSummaryExpanded);
-
   const shellClass = cn(
-    "rounded-2xl border border-neutral-200 bg-[#FFFFFF] text-sm text-foreground shadow-sm",
-    "dark:border-border dark:bg-card",
-    isExpanded ? "px-4 py-3" : "px-3 py-2",
+    "rounded-2xl border border-primary/20 bg-primary/[0.04] px-4 py-3.5 text-sm text-foreground shadow-sm",
+    "dark:border-primary/25 dark:bg-primary/[0.08]",
     className,
   );
 
-  const toggle = () => setIsExpanded((prev) => !prev);
-
   if (variant === "skeleton") {
     return (
-      <div className={shellClass} aria-busy="true" aria-label="正在生成复盘小结">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between gap-2 text-left font-semibold text-foreground"
-          onClick={toggle}
-          aria-expanded={isExpanded}
-        >
-          <span>📌 今日复盘小结</span>
-          <span className="text-muted-foreground" aria-hidden>
-            {isExpanded ? "∧" : "∨"}
-          </span>
-        </button>
-        {isExpanded ? (
-          <>
-            <div className="mb-3 mt-2 h-6 w-20 animate-pulse rounded-lg bg-muted/70" />
-            <ul className="mt-2 space-y-3 text-foreground/90">
-              <SummaryLine label="卡点：" loading />
-              <SummaryLine label="今晚任务：" loading />
-              <SummaryLine label="下次聊：" loading />
-            </ul>
-            <span className="mt-2 inline-flex gap-1">
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
-            </span>
-          </>
-        ) : null}
+      <div className={shellClass} aria-busy="true" aria-label="正在整理今晚任务">
+        <p className="text-xs font-semibold tracking-wide text-primary">今晚就做这个</p>
+        <div className="mt-2.5 h-5 w-[88%] animate-pulse rounded-md bg-muted/70" />
+        <div className="mt-2 h-3.5 w-[55%] animate-pulse rounded-md bg-muted/50" />
       </div>
     );
   }
 
   const streaming = variant === "streaming";
+  const hasTask = Boolean(tonightTask?.trim());
 
   return (
     <div
       className={shellClass}
       aria-busy={streaming ? "true" : undefined}
-      aria-label={streaming ? "正在生成复盘小结" : undefined}
+      aria-label={streaming ? "正在整理今晚任务" : undefined}
     >
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-2 text-left font-semibold text-foreground"
-        onClick={toggle}
-        aria-expanded={isExpanded}
-      >
-        <span>📌 今日复盘小结</span>
-        <span className="text-muted-foreground" aria-hidden>
-          {isExpanded ? "∧" : "∨"}
-        </span>
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-semibold tracking-wide text-primary">今晚就做这个</p>
+        {subject ? (
+          <span className="rounded-md border border-primary/20 bg-background/80 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+            {subject}
+          </span>
+        ) : streaming ? (
+          <span className="inline-block h-5 w-12 animate-pulse rounded-md bg-muted/70" />
+        ) : null}
+      </div>
 
-      {isExpanded ? (
-        <>
-          {subject ? (
-            <span
-              className={cn(
-                "mb-2 mt-2 inline-block rounded-lg border px-2 py-0.5 text-xs font-medium",
-                "border-primary/30 bg-primary/10 text-primary",
-              )}
-            >
-              {subject}
-            </span>
-          ) : streaming ? (
-            <div className="mb-3 mt-2 h-6 w-20 animate-pulse rounded-lg bg-muted/70" />
-          ) : null}
-          <ul className="mt-2 space-y-1.5 text-foreground/90">
-            <SummaryLine label="卡点：" value={weakPoint} loading={streaming && !weakPoint} />
-            <SummaryLine
-              label="今晚任务："
-              value={tonightTask}
-              loading={streaming && !tonightTask}
-            />
-            <SummaryLine label="下次聊：" value={followUp} loading={streaming && !followUp} />
-            {mastered ? (
-              <li className="border-t border-border/60 pt-2 text-emerald-700 dark:text-emerald-400">
-                <span className="font-medium">✓ 今天搞懂了：</span>
-                {mastered}
-              </li>
-            ) : null}
-          </ul>
-          {streaming ? (
-            <span
-              className="mt-1 inline-block animate-[sage-cursor_1s_steps(2)_infinite] select-none font-mono text-primary"
-              aria-hidden
-            >
-              ▋
-            </span>
-          ) : null}
-        </>
+      {hasTask ? (
+        <p className="mt-2 text-[15px] font-semibold leading-snug text-foreground">{tonightTask}</p>
+      ) : streaming ? (
+        <div className="mt-2.5 h-5 w-[88%] animate-pulse rounded-md bg-muted/70" />
+      ) : (
+        <p className="mt-2 text-muted-foreground">暂无具体任务，继续聊几句再整理。</p>
+      )}
+
+      {weakPoint ? (
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          <span className="font-medium text-muted-foreground/90">卡在 </span>
+          {weakPoint}
+        </p>
+      ) : streaming && hasTask ? (
+        <div className="mt-2 h-3.5 w-[55%] animate-pulse rounded-md bg-muted/50" />
+      ) : null}
+
+      {mastered ? (
+        <p className="mt-2.5 border-t border-border/50 pt-2 text-xs text-emerald-700 dark:text-emerald-400">
+          ✓ 今天搞懂了：{mastered}
+        </p>
+      ) : null}
+
+      {streaming ? (
+        <span
+          className="mt-1 inline-block animate-[sage-cursor_1s_steps(2)_infinite] select-none font-mono text-primary"
+          aria-hidden
+        >
+          ▋
+        </span>
       ) : null}
     </div>
   );

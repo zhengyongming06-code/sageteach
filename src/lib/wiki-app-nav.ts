@@ -21,7 +21,6 @@ export const WIKI_NAV_GROUPS: WikiNavGroup[] = [
     children: [
       { id: "today", label: "今日", to: "/app/today" },
       { id: "diagnostic", label: "知识点诊断", to: "/app/diagnostic" },
-      { id: "archive", label: "弱点档案", to: "/app/today", hash: "archive" },
     ],
   },
   {
@@ -64,39 +63,4 @@ export function flattenWikiNavLinks(): WikiSearchResult[] {
 
 export function isSubjectSearch(value: string | undefined): value is Subject {
   return !!value && (SUBJECTS as readonly string[]).includes(value);
-}
-
-export function searchWikiNav(
-  query: string,
-  knowledgeRows: { subject: string; name: string }[],
-): WikiSearchResult[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-
-  const navHits = flattenWikiNavLinks().filter(
-    (item) =>
-      item.label.toLowerCase().includes(q) ||
-      (item.meta?.toLowerCase().includes(q) ?? false),
-  );
-
-  const kpHits = knowledgeRows
-    .filter(
-      (kp) =>
-        kp.name.toLowerCase().includes(q) || kp.subject.toLowerCase().includes(q),
-    )
-    .slice(0, 8)
-    .map((kp) => ({
-      id: `kp-${kp.subject}-${kp.name}`,
-      label: kp.name,
-      meta: kp.subject,
-      to: "/app/today",
-      hash: "mastery",
-    }));
-
-  const seen = new Set<string>();
-  return [...navHits, ...kpHits].filter((item) => {
-    if (seen.has(item.id)) return false;
-    seen.add(item.id);
-    return true;
-  });
 }

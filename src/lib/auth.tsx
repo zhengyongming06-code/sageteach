@@ -51,15 +51,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+    let mounted = true;
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+      if (!mounted) return;
       setSession(s);
-      setLoading(false);
+      // Wait for storage hydration before routing guards decide "logged out".
+      if (event === "INITIAL_SESSION") {
+        setLoading(false);
+      }
     });
-    supabase.auth.getSession().then(({ data }) => {
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
       setSession(data.session);
+      // Fallback for clients that skip INITIAL_SESSION.
       setLoading(false);
     });
-    return () => sub.subscription.unsubscribe();
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const value: AuthCtx = {

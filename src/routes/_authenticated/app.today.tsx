@@ -104,7 +104,7 @@ function Today() {
     () => [
       { id: "overview", label: "概览" },
       ...knowledgeToc,
-      { id: "archive", label: "卡点档案" },
+      { id: "archive", label: "今晚任务" },
     ],
     [knowledgeToc],
   );
@@ -533,24 +533,24 @@ function Today() {
 
         <section id="archive" className="wiki-prose-section">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="wiki-prose-h2">卡点档案</h2>
-            <Link to="/app/diagnostic" className="wiki-link-text shrink-0">
-              知识点诊断 →
+            <h2 className="wiki-prose-h2">今晚任务</h2>
+            <Link to="/app/review" className="wiki-link-text shrink-0">
+              去复盘 →
             </Link>
           </div>
           <p className="wiki-prose-lead">
-            按时间整理的复盘小结，点击「标记完成」表示这个卡点已搞定。
+            每次复盘整理出的任务会留在这里。做完就点「标记完成」。
           </p>
 
           {archiveError ? (
-            <p className="text-sm text-destructive">卡点档案加载失败。</p>
+            <p className="text-sm text-destructive">今晚任务加载失败。</p>
           ) : archiveLoading && !loadDeadlinePassed ? (
-            <p className="wiki-prose-sub">加载档案…</p>
+            <p className="wiki-prose-sub">加载中…</p>
           ) : archiveLoading && loadDeadlinePassed ? (
-            <p className="wiki-prose-sub">档案加载较慢，请稍后再试或刷新页面。</p>
+            <p className="wiki-prose-sub">加载较慢，请稍后再试或刷新页面。</p>
           ) : archiveRows.length === 0 ? (
             <p className="wiki-prose-sub">
-              还没有卡点记录。完成第一次复盘后，你的档案会出现在这里。
+              还没有任务。完成第一次复盘并整理今晚任务后，会出现在这里。
             </p>
           ) : (
             <ul className="wiki-prose-list">
@@ -566,19 +566,19 @@ function Today() {
                       </div>
                       <p
                         className={cn(
-                          "mt-1.5 text-sm font-medium text-[var(--wiki-fg)]",
+                          "mt-1.5 text-sm font-medium leading-snug text-[var(--wiki-fg)]",
                           r.completed && "text-[var(--wiki-muted)] line-through",
                         )}
                       >
-                        {r.weak_point}
+                        {r.tonight_task}
                       </p>
                       <p
                         className={cn(
-                          "mt-1 text-sm text-[var(--wiki-nav-fg)]",
+                          "mt-1 text-xs text-[var(--wiki-nav-fg)]",
                           r.completed && "line-through opacity-80",
                         )}
                       >
-                        今晚任务：{r.tonight_task}
+                        卡在 {r.weak_point}
                       </p>
                       {archiveCelebrateId === r.id ? (
                         <p className="mt-2 text-sm text-[var(--wiki-nav-fg)]">✓ 搞定了这个卡点</p>

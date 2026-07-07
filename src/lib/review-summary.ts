@@ -26,18 +26,23 @@ export function formatReviewConversationForSummary(
 const SUMMARY_SYSTEM = `You extract structured data from a Chinese tutoring chat. Output ONLY valid JSON, no markdown fences, no other text.${SAGE_EXTRACTION_SAFETY_SUFFIX}`;
 
 export function buildReviewSummaryUserPrompt(conversation: string): string {
-  return `Based on this conversation, generate a JSON summary.
+  return `Based on this Chinese high-school tutoring chat, extract a short actionable summary for the student.
+Priority: tonight_task must be the most useful field — a concrete assignment they can do tonight (question count, topic, or time box).
+
 Rules:
-- weak_point / tonight_task / mastered must be grounded in what the student explicitly said or did in the chat; if unclear, use null for mastered and a cautious weak_point like "待进一步确认".
+- tonight_task: one specific action, e.g. "完成 2 道电磁感应综合题，约 25 分钟" or "重做今天卡住的第 3 题并写出完整步骤". Include quantity or duration when possible.
+- weak_point: one short phrase (≤24 Chinese chars) naming the knowledge gap; context for the task only.
+- follow_up: optional; one short question Sage could ask next time (internal use).
+- mastered: only if the student clearly demonstrated understanding in chat; else null.
 - Do NOT invent quiz results or assume which option the student picked.
-- Do NOT claim the student mastered something unless they demonstrated it in the conversation.
+- If tonight's task is unclear, infer the smallest reasonable practice from what was discussed.
 
 {
   "subject": "学科",
-  "weak_point": "这次发现的核心知识点漏洞，一句话，要具体到知识点名称",
-  "tonight_task": "一个今晚可以完成的具体任务，包含题目数量或时间",
-  "follow_up": "下次复盘时Sage要问的一个具体问题",
-  "mastered": "这次对话里学生做对了或理解了的知识点，没有则返回null"
+  "weak_point": "一句话卡点",
+  "tonight_task": "今晚可执行的具体任务",
+  "follow_up": "下次复盘要问的一句话，可简短",
+  "mastered": null
 }
 Return ONLY valid JSON.
 
@@ -63,7 +68,8 @@ export function parseReviewSummaryJson(raw: string): ReviewSummaryPayload | null
     const weak_point = String(o.weak_point ?? "").trim();
     const tonight_task = String(o.tonight_task ?? "").trim();
     const follow_up =
-      String(o.follow_up ?? "").trim() || "下次复盘时，想先从哪一块开始聊？";
+      String(o.follow_up ?? "").trim() ||
+      (weak_point ? `上次卡在「${weak_point.slice(0, 20)}」，今天进展如何？` : "今天想先从哪一科开始复盘？");
     if (!weak_point || !tonight_task) return null;
     let mastered: string | null = null;
     const mRaw = o.mastered;
@@ -133,7 +139,7 @@ export async function requestReviewSummaryStructured(
         { role: "user", content: userContent },
       ],
       {
-        max_tokens: 2000,
+        max_tokens: 900,
         timeoutMs: SUMMARY_TIMEOUT_MS,
         onDelta: options?.onDelta,
       },

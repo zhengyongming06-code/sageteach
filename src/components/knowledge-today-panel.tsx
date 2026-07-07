@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { subjectAccentPillClass, subjectAccentTaskClass } from "@/lib/subject-accent";
+import { subjectAccentTaskClass } from "@/lib/subject-accent";
 import type { TodayTocSection } from "@/components/today-page-rail";
 import {
   fetchDailyTraining,
@@ -11,7 +11,6 @@ import {
 } from "@/lib/knowledge-tracking/api";
 import {
   fetchMistakePatterns,
-  fetchWeakKnowledgePoints,
   knowledgeLocalYmd,
   markDailyTrainingDone,
   SAGE_KNOWLEDGE_REFRESH_EVENT,
@@ -31,7 +30,6 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
   useEffect(() => {
     const refresh = () => {
       void qc.invalidateQueries({ queryKey: knowledgeTrackingQueryKeys.dailyTraining(userId, today) });
-      void qc.invalidateQueries({ queryKey: knowledgeTrackingQueryKeys.mastery(userId) });
       void qc.invalidateQueries({ queryKey: ["mistake-patterns", userId] });
     };
     window.addEventListener(SAGE_KNOWLEDGE_REFRESH_EVENT, refresh);
@@ -41,12 +39,6 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
   const { data: training = [], isLoading: trainingLoading } = useQuery({
     queryKey: knowledgeTrackingQueryKeys.dailyTraining(userId, today),
     queryFn: () => fetchDailyTraining(userId, today),
-    staleTime: 30_000,
-  });
-
-  const { data: weakPoints = [] } = useQuery({
-    queryKey: knowledgeTrackingQueryKeys.mastery(userId),
-    queryFn: () => fetchWeakKnowledgePoints(userId, 6),
     staleTime: 30_000,
   });
 
@@ -63,16 +55,15 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
     },
   });
 
-  const hasContent = training.length > 0 || weakPoints.length > 0 || patterns.length > 0;
+  const hasContent = training.length > 0 || patterns.length > 0;
 
   useEffect(() => {
     if (!onTocChange) return;
     const sections: TodayTocSection[] = [];
     if (training.length > 0) sections.push({ id: "training", label: "今日训练" });
-    if (weakPoints.length > 0) sections.push({ id: "mastery", label: "薄弱知识点" });
     if (patterns.length > 0) sections.push({ id: "patterns", label: "错误模式" });
     onTocChange(sections);
-  }, [training.length, weakPoints.length, patterns.length, onTocChange]);
+  }, [training.length, patterns.length, onTocChange]);
 
   if (!hasContent && !trainingLoading) {
     return (
@@ -82,9 +73,14 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
           <p className="wiki-prose-sub">
             在复盘里拍照搜题后，Sage 会自动提取知识点、记录错题，并在这里推荐今日训练。
           </p>
-          <Link to="/app/review" className="wiki-link-text mt-3 inline-block">
-            去拍照搜题 →
-          </Link>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <Link to="/app/review" className="wiki-link-text">
+              去拍照搜题 →
+            </Link>
+            <Link to="/app/diagnostic" className="wiki-link-text">
+              知识点诊断 →
+            </Link>
+          </div>
         </div>
       </section>
     );
@@ -106,22 +102,6 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
               />
             ))}
           </ul>
-        </section>
-      ) : null}
-
-      {weakPoints.length > 0 ? (
-        <section id="mastery" className="wiki-prose-section">
-          <h2 className="wiki-prose-h2">薄弱知识点</h2>
-          <div className="wiki-tags mt-2">
-            {weakPoints.map((kp: { subject: string; name: string; mastery_score?: number | null }) => (
-              <span key={`${kp.subject}-${kp.name}`} className={subjectAccentPillClass(kp.subject)}>
-                {kp.subject} · {kp.name}
-                {typeof kp.mastery_score === "number" ? (
-                  <span className="tabular-nums opacity-70"> {Math.round(kp.mastery_score)}</span>
-                ) : null}
-              </span>
-            ))}
-          </div>
         </section>
       ) : null}
 

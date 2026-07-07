@@ -1,40 +1,61 @@
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Link2, Moon, Sparkles, type LucideIcon } from "lucide-react";
 import { LandingCapabilityGraph } from "@/components/landing-capability-graph";
 import { SageLogo } from "@/components/sage-logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/lib/auth";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
   component: Landing,
 });
 
+const visionPillars: { icon: LucideIcon; title: string; desc: string }[] = [
+  {
+    icon: Link2,
+    title: "把复盘串成一条线",
+    desc: "不只记一道题，而是连接卡点、方法、情绪与下一步行动。",
+  },
+  {
+    icon: Moon,
+    title: "每天结束后的第二大脑",
+    desc: "回顾今天真正难在哪，安排今晚最小可行任务，第二天继续跟进。",
+  },
+  {
+    icon: Sparkles,
+    title: "持续进化的 AI 教练",
+    desc: "诊断、知识图谱、拍照识题与个性化训练，随你的数据越用越准。",
+  },
+];
+
 const products = [
   {
-    tag: "已上线",
-    live: true,
+    status: "live" as const,
     title: "学科复盘",
     desc: "今天哪道题让你卡了最久？说出来，拆开看，把卡点变成可执行的今晚任务。",
   },
   {
-    tag: "已上线",
-    live: true,
+    status: "live" as const,
     title: "AI 教练",
     desc: "它记得你上次卡在哪，不会每次都从头问你，对话围绕你的真实薄弱点展开。",
   },
   {
-    tag: "已上线",
-    live: true,
+    status: "live" as const,
     title: "提分规划",
     desc: "离目标还差多少分，先搞清楚该把时间花在哪，而不是盲目刷题。",
   },
   {
-    tag: "预览中",
-    live: true,
+    status: "preview" as const,
     title: "知识追踪",
     desc: "拍照识题后自动抽取知识点，逐步建立你的个人知识图谱与掌握度。",
   },
 ] as const;
+
+function productStatusLabel(status: (typeof products)[number]["status"]) {
+  if (status === "live") return "已上线";
+  if (status === "preview") return "预览中";
+  return "规划中";
+}
 
 function SessionCheck() {
   return (
@@ -105,33 +126,31 @@ function Landing() {
           </div>
         </section>
 
-        <section id="vision" className="sy-section sy-two-column px-4 sm:px-0">
-          <div className="sy-section-intro">
-            <p className="sy-eyebrow sy-latin">Vision</p>
+        <section id="vision" className="sy-section sy-section-vision sy-vision-band px-4 sm:px-0">
+          <div className="sy-vision-header">
+            <p className="sy-eyebrow">愿景</p>
             <h2 className="sy-h2">连接的复盘，而不是散落的笔记。</h2>
-          </div>
-          <div className="sy-section-copy">
-            <p>
-              Sage 的目标，是让备考学习更连贯、更可执行、更可追踪。每次复盘不只记录一道题，
-              而是把卡点、方法、情绪与下一步行动串成一条线。
-            </p>
-            <p>
-              面向学生与家长，Sage 是每天结束学习后的「第二大脑」：帮你回顾今天真正难在哪里，
-              安排今晚最小可行任务，并在第二天继续跟进。
-            </p>
-            <p>
-              作为 AI 教练，Sage 可以持续进化：更精准的学科诊断、知识图谱、拍照识题、
-              以及基于你历史数据的个性化训练，都会逐步加入。
+            <p className="sy-vision-lead">
+              让备考学习更连贯、更可执行、更可追踪——每次复盘都指向下一步行动。
             </p>
           </div>
+          <ul className="sy-vision-pillars">
+            {visionPillars.map(({ icon: Icon, title, desc }) => (
+              <li key={title} className="sy-vision-pillar">
+                <span className="sy-vision-pillar-icon" aria-hidden>
+                  <Icon className="h-[1.125rem] w-[1.125rem]" strokeWidth={2.25} />
+                </span>
+                <h3>{title}</h3>
+                <p>{desc}</p>
+              </li>
+            ))}
+          </ul>
         </section>
 
-        <section id="products" className="sy-section px-4 sm:px-0">
-          <div className="sy-section-heading">
-            <div className="sy-section-intro">
-              <p className="sy-eyebrow sy-latin">Products</p>
-              <h2 className="sy-h2">当前与规划中的 Sage 能力</h2>
-            </div>
+        <section id="products" className="sy-section sy-section-products px-4 sm:px-0">
+          <div className="sy-section-heading-stacked">
+            <p className="sy-eyebrow">功能</p>
+            <h2 className="sy-h2">Sage 能帮你做什么</h2>
             <p className="sy-section-kicker">
               从每日复盘出发，逐步扩展为完整的学习支持系统。
             </p>
@@ -140,12 +159,20 @@ function Landing() {
             {products.map((p) => (
               <article
                 key={p.title}
-                className={p.live ? "sy-product-card sy-product-card-live" : "sy-product-card"}
+                className={cn(
+                  "sy-product-card",
+                  p.status === "live" && "sy-product-card-live",
+                  p.status === "preview" && "sy-product-card-preview",
+                )}
               >
-                <div className="sy-card-topline">
-                  <span className="sy-status">{p.tag}</span>
-                  <span className="sy-latin">{p.live ? "Live" : "Planned"}</span>
-                </div>
+                <span
+                  className={cn(
+                    "sy-status",
+                    p.status === "preview" && "sy-status-preview",
+                  )}
+                >
+                  {productStatusLabel(p.status)}
+                </span>
                 <h3>{p.title}</h3>
                 <p>{p.desc}</p>
               </article>
@@ -155,7 +182,7 @@ function Landing() {
 
         <section id="access" className="sy-section sy-access-band sy-access-layout px-4 sm:px-0">
           <div className="sy-section-intro">
-            <p className="sy-eyebrow sy-latin">Current Access</p>
+            <p className="sy-eyebrow">开始使用</p>
             <h2 className="sy-h2">现在注册，开始今天的复盘。</h2>
           </div>
           <div className="sy-access-right">
