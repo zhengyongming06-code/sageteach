@@ -12,16 +12,22 @@ function Guard() {
   const { session, loading } = useAuth();
   const qc = useQueryClient();
   const [checked, setChecked] = useState(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
 
   useEffect(() => {
-    if (loading) return;
+    if (!loading) return;
+    const t = window.setTimeout(() => setAuthTimedOut(true), 5000);
+    return () => window.clearTimeout(t);
+  }, [loading]);
+
+  useEffect(() => {
+    if (loading && !authTimedOut) return;
     if (!session) {
-      // redirect to login
       window.location.replace("/login");
       return;
     }
     setChecked(true);
-  }, [loading, session]);
+  }, [loading, session, authTimedOut]);
 
   useEffect(() => {
     const uid = session?.user?.id;
@@ -29,10 +35,11 @@ function Guard() {
     void qc.prefetchQuery(weakArchiveQueryOptions(uid));
   }, [loading, session?.user?.id, qc]);
 
-  if (loading || !checked) {
+  if ((loading && !authTimedOut) || !checked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-sm text-muted-foreground">加载中…</div>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6">
+        <div className="h-2 w-2 animate-pulse rounded-full bg-muted-foreground/60" aria-hidden />
+        <p className="text-sm text-muted-foreground">加载中…</p>
       </div>
     );
   }

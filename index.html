@@ -39,7 +39,24 @@
         } catch (e) {}
       })();
     </script>
-    <div id="root"></div>
+    <div id="root">
+      <div
+        id="boot-splash"
+        style="
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 24px;
+          font-family: system-ui, -apple-system, 'PingFang SC', sans-serif;
+          font-size: 14px;
+          color: #64748b;
+          background: #f9fafb;
+        "
+      >
+        加载中…
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

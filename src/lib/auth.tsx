@@ -53,24 +53,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    const finishLoading = () => {
+      if (mounted) setLoading(false);
+    };
+
+    const timeout = window.setTimeout(finishLoading, 5000);
+
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       if (!mounted) return;
       setSession(s);
-      // Wait for storage hydration before routing guards decide "logged out".
       if (event === "INITIAL_SESSION") {
-        setLoading(false);
+        finishLoading();
       }
     });
 
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      // Fallback for clients that skip INITIAL_SESSION.
-      setLoading(false);
-    });
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session);
+        finishLoading();
+      })
+      .catch((err) => {
+        console.warn("[auth] getSession failed", err);
+        finishLoading();
+      });
 
     return () => {
       mounted = false;
+      window.clearTimeout(timeout);
       sub.subscription.unsubscribe();
     };
   }, []);

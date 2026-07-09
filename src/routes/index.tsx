@@ -59,18 +59,9 @@ function ProductCtaLink({
   );
 }
 
-function SessionCheck() {
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f9fafb]">
-      <div className="h-2 w-2 animate-pulse rounded-full bg-[#64748b]/60" aria-hidden />
-    </div>
-  );
-}
-
 function Landing() {
-  const { session, loading } = useAuth();
+  const { session } = useAuth();
 
-  if (loading) return <SessionCheck />;
   if (session) return <Navigate to="/app/today" replace />;
 
   return (
