@@ -19,6 +19,11 @@ import type { PendingChatImage } from "@/components/chat-image-picker";
 import { SageChatComposer, type SageChatComposerHandle } from "@/components/sage-chat-composer";
 import { SageChatMessageList } from "@/components/sage-chat-message-list";
 import { isPhotoOnlyMessageContent } from "@/lib/review-photo-messages";
+import type { KnowledgeRemediation } from "@/lib/knowledge-topics/recommend";
+import type {
+  RemediationAction,
+  RemediationProgress,
+} from "@/lib/knowledge-tracking/remediation-progress";
 
 export type SageChatMessage = {
   id: string;
@@ -53,6 +58,13 @@ type SageChatPanelProps = {
   onClearImage?: () => void;
   photoAnalysisLoading?: boolean;
   streamingPhotoMarkdown?: string | null;
+  photoRemediationByMessageId?: Record<string, KnowledgeRemediation>;
+  photoRemediationProgressByMessageId?: Record<string, RemediationProgress>;
+  onPhotoRemediationMarkProgress?: (
+    messageId: string,
+    action: RemediationAction,
+  ) => Promise<RemediationProgress>;
+  onPhotoRemediationFollowUp?: (text: string) => void;
 };
 
 const NEAR_BOTTOM_PX = 100;
@@ -80,6 +92,10 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
     onClearImage,
     photoAnalysisLoading = false,
     streamingPhotoMarkdown = null,
+    photoRemediationByMessageId = {},
+    photoRemediationProgressByMessageId = {},
+    onPhotoRemediationMarkProgress,
+    onPhotoRemediationFollowUp,
   }: SageChatPanelProps,
   ref: Ref<SageChatPanelHandle>,
 ) {
@@ -296,6 +312,10 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
             streamingAssistantText={streamingAssistantText}
             streamingPhotoMarkdown={streamingPhotoMarkdown}
             photoAnalysisLoading={photoAnalysisLoading}
+            photoRemediationByMessageId={photoRemediationByMessageId}
+            photoRemediationProgressByMessageId={photoRemediationProgressByMessageId}
+            onPhotoRemediationMarkProgress={onPhotoRemediationMarkProgress}
+            onPhotoRemediationFollowUp={onPhotoRemediationFollowUp}
             flyingUserMessageId={flyingUserMessageId}
             newBubbleRef={newBubbleRef}
           />

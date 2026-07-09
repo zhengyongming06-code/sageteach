@@ -115,6 +115,27 @@ export async function findExistingReviewSummary(
   };
 }
 
+export async function updateReviewSummaryRow(
+  id: string,
+  parsed: Pick<ReviewSummaryPayload, "weak_point" | "tonight_task" | "follow_up" | "mastered">,
+  client: SupabaseClient<Database> = supabase,
+): Promise<void> {
+  await requireAuthenticatedUserId(client);
+  const patch: Record<string, string | null> = {
+    weak_point: parsed.weak_point.slice(0, 4000),
+    tonight_task: parsed.tonight_task.slice(0, 4000),
+    follow_up: parsed.follow_up.slice(0, 2000),
+  };
+  if (parsed.mastered !== undefined) {
+    patch.mastered = parsed.mastered ? parsed.mastered.slice(0, 2000) : null;
+  }
+  const { error } = await client.from("review_summaries").update(patch).eq("id", id);
+  if (error) {
+    logSupabaseError("review-summary update", error, { id, patch });
+    throw error;
+  }
+}
+
 /**
  * Insert into review_summaries using the shared authenticated Supabase client.
  */

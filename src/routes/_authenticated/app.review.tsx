@@ -25,10 +25,22 @@ import {
   SAGE_PHOTO_MD_MARKER,
   sanitizePhotoMarkdownForDisplay,
   stripPhotoContentForChatApi,
+  unwrapPhotoMarkdown,
   wrapPhotoMarkdown,
 } from "@/lib/question-photo-analysis";
 import { isPhotoQuizRevealRequest } from "@/lib/photo-quiz-parse";
 import { ingestPhotoEvidence } from "@/lib/knowledge-tracking/ingest-client";
+import {
+  buildKnowledgeRemediationFromExtraction,
+  fetchPhotoRemediationsForMessages,
+  type KnowledgeRemediation,
+} from "@/lib/knowledge-topics/recommend";
+import {
+  fetchRemediationProgressMap,
+  recordPhotoRemediationProgress,
+  type RemediationAction,
+  type RemediationProgress,
+} from "@/lib/knowledge-tracking/remediation-progress";
 import {
   isPhotoOnlyMessageContent,
   SAGE_PHOTO_MESSAGE_MARKER,
@@ -37,7 +49,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { subjectAccentTaskClass } from "@/lib/subject-accent";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -161,18 +172,6 @@ function sessionListPreview(row: SessionRow): string {
   return "复盘进行中，尚未整理今晚任务";
 }
 
-/** e.g. 5月14日 化学 14:30 — mobile drawer / cross-subject lists. */
-function formatSessionSidebarLabel(sessionDate: string, subject: string, startedAtIso: string) {
-  const [, mo, da] = sessionDate.split("-").map(Number);
-  const time = formatSessionTime(startedAtIso);
-  return `${mo}月${da}日 ${subject} ${time}`;
-}
-
-/** e.g. 5月26日 20:35 — mobile drawer subtitle (subject already in badge). */
-function formatSessionDateTimeLabel(sessionDate: string, startedAtIso: string) {
-  const [, mo, da] = sessionDate.split("-").map(Number);
-  return `${mo}月${da}日 ${formatSessionTime(startedAtIso)}`;
-}
 
 function formatSessionTime(startedAtIso: string) {
   const t = new Date(startedAtIso);
@@ -294,6 +293,11 @@ function Review() {
   const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
   const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
   const [photoAnalysisLoading, setPhotoAnalysisLoading] = useState(false);
+  const [photoRemediationByMessageId, setPhotoRemediationByMessageId] = useState<
+    Record<string, KnowledgeRemediation>
+  >({});
+  const [photoRemediationProgressByMessageId, setPhotoRemediationProgressByMessageId] =
+    useState<Record<string, RemediationProgress>>({});
   const [messages, setMessages] = useState<SageChatMessage[]>([]);
   const [chatScopeKey, setChatScopeKey] = useState(() => reviewScopeKey(SUBJECTS[0], null));
   const [subjectChatLoading, setSubjectChatLoading] = useState(false);
@@ -393,6 +397,24 @@ function Review() {
         }));
         setMessageRows(rows);
         setMessages(coachRowsToChatMessages(rows));
+
+        const photoAssistantIds = rows
+          .filter((r) => r.role === "assistant" && unwrapPhotoMarkdown(r.content).isPhotoAnalysis)
+          .map((r) => r.id);
+        if (photoAssistantIds.length > 0) {
+          void Promise.all([
+            fetchPhotoRemediationsForMessages(photoAssistantIds),
+            fetchRemediationProgressMap(photoAssistantIds),
+          ]).then(([remediationMap, progressMap]) => {
+            if (loadSeq !== historyLoadSeqRef.current || activeKeyRef.current !== targetKey) return;
+            if (Object.keys(remediationMap).length > 0) {
+              setPhotoRemediationByMessageId((prev) => ({ ...prev, ...remediationMap }));
+            }
+            if (Object.keys(progressMap).length > 0) {
+              setPhotoRemediationProgressByMessageId((prev) => ({ ...prev, ...progressMap }));
+            }
+          });
+        }
       } catch (e) {
         console.warn("[review-messages] loadHistory", e);
       } finally {
@@ -1351,9 +1373,16 @@ function Review() {
             session_slug: sessionSlug,
             analysis_markdown: markdown,
           }).then((res) => {
+            const remediation = buildKnowledgeRemediationFromExtraction(res.extraction);
+            if (remediation) {
+              setPhotoRemediationByMessageId((prev) => ({
+                ...prev,
+                [assistantRow.id]: remediation,
+              }));
+            }
             const n = res.extraction.knowledge_points.length;
             if (n > 0) {
-              toast.success(`已记录 ${n} 个知识点到掌握度档案`);
+              toast.success(`已识点 ${n} 个，辅学块已更新；今晚任务已写入今日页`);
             }
           }).catch((e) => {
             console.warn("[knowledge-ingest]", e);
@@ -1691,6 +1720,29 @@ function Review() {
       />
     ) : null;
 
+  const handlePhotoRemediationMarkProgress = useCallback(
+    async (messageId: string, action: RemediationAction) => {
+      const remediation = photoRemediationByMessageId[messageId];
+      if (!remediation) {
+        throw new Error("missing remediation");
+      }
+      const current = photoRemediationProgressByMessageId[messageId] ?? {
+        video_watched: false,
+        practice_done: false,
+      };
+      const next = await recordPhotoRemediationProgress({
+        coachMessageId: messageId,
+        subject: remediation.subject,
+        knowledgePoint: remediation.primaryKnowledgePoint,
+        action,
+        current,
+      });
+      setPhotoRemediationProgressByMessageId((prev) => ({ ...prev, [messageId]: next }));
+      return next;
+    },
+    [photoRemediationByMessageId, photoRemediationProgressByMessageId],
+  );
+
   const renderChatPanel = (layout: "default" | "mobile") => (
     <SageChatPanel
       ref={chatPanelRef}
@@ -1717,6 +1769,10 @@ function Review() {
       onClearImage={handleClearImage}
       photoAnalysisLoading={photoAnalysisLoading}
       streamingPhotoMarkdown={streamingPhotoMarkdown}
+      photoRemediationByMessageId={photoRemediationByMessageId}
+      photoRemediationProgressByMessageId={photoRemediationProgressByMessageId}
+      onPhotoRemediationMarkProgress={handlePhotoRemediationMarkProgress}
+      onPhotoRemediationFollowUp={(text) => chatPanelRef.current?.setInputValue(text)}
       betweenScrollAndInput={
         showEndReviewButton ? (
           <Button
@@ -1801,23 +1857,24 @@ function Review() {
         {drawerOpen ? (
           <button
             type="button"
-            className="fixed inset-0 z-40 bg-black/40"
+            className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px]"
             aria-label="关闭复盘历史"
             onClick={() => setDrawerOpen(false)}
           />
         ) : null}
         <div
           className={cn(
-            "fixed left-0 top-0 z-50 flex h-full w-[78%] max-w-sm flex-col bg-white shadow-xl transition-transform duration-200 ease-out",
+            "wiki-mobile-history-drawer fixed inset-y-0 left-0 z-50 flex w-full max-w-md flex-col bg-[var(--wiki-bg)] shadow-2xl transition-transform duration-200 ease-out",
             drawerOpen ? "translate-x-0" : "pointer-events-none -translate-x-full",
           )}
+          aria-hidden={!drawerOpen}
         >
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-            <h2 className="text-base font-semibold">复盘历史</h2>
+          <div className="wiki-mobile-history-header">
+            <h2 className="text-base font-semibold text-[var(--wiki-heading)]">复盘历史</h2>
             <button
               type="button"
               onClick={() => setDrawerOpen(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-muted-foreground hover:bg-muted"
+              className="wiki-mobile-history-close"
               aria-label="关闭"
             >
               ×
@@ -1844,52 +1901,46 @@ function Review() {
               </button>
             </div>
           ) : null}
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3 [-webkit-overflow-scrolling:touch]">
+          <div className="wiki-mobile-history-scroll">
             {drawerSessionGroups.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-muted-foreground">暂无复盘记录</p>
+              <p className="px-4 py-10 text-center text-sm text-[var(--wiki-muted)]">暂无复盘记录</p>
             ) : (
               drawerSessionGroups.map((group) => (
-                <div key={group.label} className="mb-4">
-                  <p className="mb-2 px-4 text-xs font-medium text-muted-foreground">{group.label}</p>
-                  <ul className="space-y-0 divide-y divide-border border-y border-border">
+                <section key={group.label} className="wiki-mobile-history-group">
+                  <p className="wiki-mobile-history-group-label">{group.label}</p>
+                  <ul className="wiki-mobile-history-list">
                     {group.rows.map((row) => {
                       const tag =
                         MOBILE_SUBJECT_TAG_STYLES[row.subject] ?? MOBILE_SUBJECT_TAG_STYLES["地理"];
                       const active = activeSessionSlug === row.session_slug;
                       return (
-                        <li key={row.session_slug}>
+                        <li key={`${row.session_slug}-${row.subject}`}>
                           <button
                             type="button"
                             onClick={() => pickSessionFromDrawer(row)}
-                            className={cn(
-                              "w-full border-0 border-b border-border bg-white py-3 pl-5 pr-4 text-left transition last:border-b-0",
-                              subjectAccentTaskClass(row.subject),
-                              active ? "bg-primary/5" : "hover:bg-muted/50",
-                            )}
+                            data-active={active ? "true" : undefined}
+                            className="wiki-mobile-history-item"
                           >
-                            <div className="flex items-start justify-between gap-2">
+                            <span className="wiki-mobile-history-item-head">
                               <span
-                                className="shrink-0 rounded px-2 py-0.5 text-xs font-medium"
+                                className="wiki-mobile-history-subject"
                                 style={{ backgroundColor: tag.bg, color: tag.color }}
                               >
                                 {row.subject}
                               </span>
-                              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                              <time className="wiki-mobile-history-time">
                                 {formatSessionTime(row.started_at)}
-                              </span>
-                            </div>
-                            <p className="mt-1.5 text-sm tabular-nums text-muted-foreground">
-                              {formatSessionDateTimeLabel(row.session_date, row.started_at)}
-                            </p>
-                            <p className="mt-1 line-clamp-2 text-sm text-[var(--wiki-nav-fg)]">
+                              </time>
+                            </span>
+                            <span className="wiki-mobile-history-preview">
                               {sessionListPreview(row)}
-                            </p>
+                            </span>
                           </button>
                         </li>
                       );
                     })}
                   </ul>
-                </div>
+                </section>
               ))
             )}
           </div>

@@ -3,7 +3,13 @@ import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
 import { PhotoAnalysisMarkdown } from "@/components/photo-analysis-markdown";
+import { PhotoRemediationPanel } from "@/components/photo-remediation-panel";
 import { unwrapPhotoMarkdown } from "@/lib/question-photo-analysis";
+import type { KnowledgeRemediation } from "@/lib/knowledge-topics/recommend";
+import type {
+  RemediationAction,
+  RemediationProgress,
+} from "@/lib/knowledge-tracking/remediation-progress";
 import {
   isPhotoOnlyMessageContent,
   PHOTO_UPLOADED_LABEL,
@@ -106,6 +112,13 @@ export type SageChatMessageListProps = {
   streamingAssistantText: string | null;
   streamingPhotoMarkdown: string | null;
   photoAnalysisLoading: boolean;
+  photoRemediationByMessageId?: Record<string, KnowledgeRemediation>;
+  photoRemediationProgressByMessageId?: Record<string, RemediationProgress>;
+  onPhotoRemediationMarkProgress?: (
+    messageId: string,
+    action: RemediationAction,
+  ) => Promise<RemediationProgress>;
+  onPhotoRemediationFollowUp?: (text: string) => void;
   flyingUserMessageId: string | null;
   newBubbleRef: RefObject<HTMLDivElement | null>;
 };
@@ -123,28 +136,59 @@ export const SageChatMessageList = memo(function SageChatMessageList({
   streamingAssistantText,
   streamingPhotoMarkdown,
   photoAnalysisLoading,
+  photoRemediationByMessageId = {},
+  photoRemediationProgressByMessageId = {},
+  onPhotoRemediationMarkProgress,
+  onPhotoRemediationFollowUp,
   flyingUserMessageId,
   newBubbleRef,
 }: SageChatMessageListProps) {
-  const renderAssistantPhotoBubble = (markdown: string, loading: boolean, key?: string) => (
-    <div key={key} className="flex justify-start">
-      {isMobile ? (
-        <div className="flex max-w-[94%] flex-col items-start gap-1">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="wiki-sage-dot h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
-            Sage
+  const renderAssistantPhotoBubble = (
+    markdown: string,
+    loading: boolean,
+    key?: string,
+    messageId?: string,
+  ) => {
+    const remediation = messageId ? photoRemediationByMessageId[messageId] : undefined;
+    const progress = messageId
+      ? photoRemediationProgressByMessageId[messageId]
+      : undefined;
+    const bubble = (
+      <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-white px-4 py-4 shadow-sm md:rounded-2xl">
+        <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
+        {remediation ? (
+          <PhotoRemediationPanel
+            remediation={remediation}
+            progress={progress}
+            coachMessageId={messageId}
+            onMarkProgress={
+              messageId && onPhotoRemediationMarkProgress
+                ? (action) => onPhotoRemediationMarkProgress(messageId, action)
+                : undefined
+            }
+            onAskFollowUp={onPhotoRemediationFollowUp}
+            className="mt-4"
+          />
+        ) : null}
+      </div>
+    );
+
+    return (
+      <div key={key} className="flex justify-start">
+        {isMobile ? (
+          <div className="flex max-w-[94%] flex-col items-start gap-1">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="wiki-sage-dot h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
+              Sage
+            </div>
+            {bubble}
           </div>
-          <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-white px-4 py-4 shadow-sm">
-            <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
-          </div>
-        </div>
-      ) : (
-        <div className="max-w-[min(100%,32rem)] min-w-0 rounded-2xl border border-border/80 bg-white px-4 py-4 shadow-sm">
-          <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
-        </div>
-      )}
-    </div>
-  );
+        ) : (
+          <div className="max-w-[min(100%,32rem)] min-w-0">{bubble}</div>
+        )}
+      </div>
+    );
+  };
 
   const renderAssistantBubble = (content: string, streaming = false, key?: string) => (
     <div key={key} className="flex justify-start">
@@ -169,7 +213,7 @@ export const SageChatMessageList = memo(function SageChatMessageList({
   const renderAssistantMessage = (msg: SageChatMessage) => {
     const { isPhotoAnalysis, markdown } = unwrapPhotoMarkdown(msg.content);
     if (isPhotoAnalysis) {
-      return renderAssistantPhotoBubble(markdown, false, msg.id);
+      return renderAssistantPhotoBubble(markdown, false, msg.id, msg.id);
     }
     return renderAssistantBubble(msg.content, false, msg.id);
   };

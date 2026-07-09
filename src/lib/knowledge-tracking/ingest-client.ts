@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
 import { generateDailyTrainingItems } from "@/lib/knowledge-tracking/daily-training";
+import { persistPhotoKnowledgeToTonightTask } from "@/lib/photo-weak-archive";
 import {
   buildPhotoKnowledgeExtractionUserPrompt,
   parsePhotoExtractionJson,
@@ -16,7 +17,7 @@ import type {
   KnowledgeTrackPhotoResponse,
   PhotoKnowledgeExtraction,
 } from "@/lib/knowledge-tracking/types";
-import { getKnowledgePointsForSubject, isSubject } from "@/lib/knowledge-points";
+import { persistPhotoKnowledgeToTonightTask } from "@/lib/photo-weak-archive";
 import type { Subject } from "@/lib/subjects";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -361,6 +362,19 @@ export async function ingestPhotoEvidenceClient(
   }
 
   await upsertMistakePattern(user.id, payload.subject, extraction);
+
+  if (extraction.knowledge_points.length > 0) {
+    try {
+      await persistPhotoKnowledgeToTonightTask({
+        subject: payload.subject,
+        sessionDate: payload.session_date,
+        reviewSessionSlug: payload.session_slug,
+        extraction,
+      });
+    } catch (e) {
+      console.warn("[knowledge-ingest] tonight task", e);
+    }
+  }
 
   const { tree, dailyItems } = await refreshDerivedViews(
     user.id,

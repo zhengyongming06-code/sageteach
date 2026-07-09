@@ -77,6 +77,7 @@ export function buildReviewDeepSeekSystemPrompt(options: {
     SAGE_DEEPSEEK_SYSTEM_PROMPT +
     SAGE_DUAL_MODE_SUFFIX +
     REVIEW_PRACTICE_PROBLEM_SUFFIX +
+    SAGE_PHOTO_REMEDIATION_SUFFIX +
     SAGE_RESOURCE_RECOMMENDATIONS_SUFFIX +
     reviewContextSuffix(subject, sessionDate) +
     reviewSubjectIsolationSuffix(subject, sessionDate);
@@ -164,35 +165,21 @@ D. [选项 D 完整文字]
 「记一下这个，你刚才想通的那一步——（这里写出你观察到的、具体的那一步），这就是你今天真正学会的东西。」
 其中括号部分必须根据对话具体化，不要写空话。`;
 
-/** Optional B站老师推荐：自然提起，不强制；复盘对话中拼接在卡点练习规则之后。 */
-export const SAGE_RESOURCE_RECOMMENDATIONS_SUFFIX = `
+/** Optional B站老师：口语提及即可；链接由拍题后的辅学块提供。 */
+export const SAGE_PHOTO_REMEDIATION_SUFFIX = `
 
-## 推荐资源（自然时机推荐，不强制）
+## 拍题辅学块（必须遵守）
 
-当学生遇到某个卡点，如果推荐一个具体的老师能帮到他，
-就自然地提一句——就像学长聊天时顺口说的，不是广告。
+学生拍照搜题后，解析气泡**下方**会出现固定「辅学块」，含：识点标签、推荐 B 站视频、同类练手、「打开知识点页」「继续追问 Sage」。
 
-如果对话节奏不合适，不提也没关系。
-宁可不提，也不要生硬地插进去。
+你的分工：
+- **不要在对话正文里重复贴视频链接、B 站搜索地址或长资源列表。**
+- 需要时一句带过即可，例如：「辅学块里有推荐视频，先看再练；还不懂再跟我说卡在哪一步。」
+- 追问时只帮定位「真不懂的那一步」，不要给完整解答或整题标准答案。
+- 整理今晚任务时引用辅学块里的具体知识点，任务要可执行（题量/时长），例如「完成 2 道 XX 同类题，约 20 分钟」。
 
-各学科推荐老师（产品创始人亲测有效）：
+各学科主讲（口语提名字即可，不要贴 URL）：
+语文→国家玮；数学→赵礼显；英语→FREE高考英语/龙坚；物理基础→黄夫人、进阶→夏梦迪；化学→李政；生物→李林；政史地→刘勖雯。`;
 
-语文 → 国家玮（B站）
-数学 → 赵礼显（B站）
-英语 → 陶然 free高考英语（B站）、龙坚（B站）
-物理基础 → 黄夫人（B站）
-物理中高档题 → 夏梦迪（B站）
-化学 → 李政（B站）
-生物 → 一生儿（B站）
-生物遗传题 → 万猛（B站）
-政治/历史/地理 → 刘瑁雯（B站）
-
-自然推荐的时机：
-- 学生做错了某类题，解释完之后顺口说
-- 学生说「我这个一直没搞懂」的时候
-- 复盘结束，给今晚任务的时候带一句
-
-语气：
-✓ 「赵礼显有一期专门讲这个，你今晚可以去搜来看」
-✓ 「我感觉你基础还行，去看黄夫人的受力分析，她讲得比课本直接多了」
-✗ 「推荐资源：赵礼显老师B站视频」`;
+/** @deprecated 链接改由辅学块承载；保留空壳避免旧引用报错 */
+export const SAGE_RESOURCE_RECOMMENDATIONS_SUFFIX = "";

@@ -103,7 +103,8 @@ function searchKnowledge(query: string, rows: WikiKnowledgeSearchRow[]): WikiSea
         label: row.name,
         detail,
         meta: row.subject,
-        to: "/app/diagnostic",
+        to: "/app/learn",
+        search: { subject: row.subject, topic: row.name },
       };
     });
 }
@@ -225,7 +226,8 @@ export function buildWikiSearchSuggestions(ctx: {
           ? `掌握度 ${Math.round(row.mastery_score)}%`
           : "薄弱知识点",
       meta: row.subject,
-      to: "/app/diagnostic",
+      to: "/app/learn",
+      search: { subject: row.subject, topic: row.name },
     })),
   ];
 
@@ -278,7 +280,7 @@ export function wikiSearchBreadcrumb(item: WikiSearchResult): string {
     case "task":
       return `Sage › 今日 › 今晚任务 › ${item.meta?.split(" · ")[0] ?? "复盘"}`;
     case "knowledge":
-      return `Sage › 今日 › 知识点 › ${item.meta ?? "学科"}`;
+      return `Sage › 辅学 › ${item.meta ?? "学科"} › ${item.label}`;
     case "action":
       return `Sage › ${item.meta ?? "快捷"} › ${item.label}`;
     case "nav":
@@ -293,7 +295,7 @@ export function wikiSearchPreviewHint(item: WikiSearchResult): string {
     case "task":
       return "复盘整理出的可执行任务。做完可在今日页标记完成。";
     case "knowledge":
-      return "来自你的掌握度数据。可在今日页查看训练与诊断。";
+      return "跳转到知识点条目页，含视频推荐与同类练手。";
     case "action":
       return "快捷跳转到常用操作，Enter 立即打开。";
     case "nav":

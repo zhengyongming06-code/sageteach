@@ -69,11 +69,8 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
     return (
       <section className="wiki-prose-section">
         <div className="wiki-callout">
-          <h2 className="wiki-prose-h2 !mb-2 !text-base">知识状态追踪</h2>
-          <p className="wiki-prose-sub">
-            在复盘里拍照搜题后，Sage 会自动提取知识点、记录错题，并在这里推荐今日训练。
-          </p>
-          <div className="mt-3 flex flex-wrap gap-3">
+          <h2 className="wiki-prose-h2 !mb-3 !text-base">知识状态追踪</h2>
+          <div className="flex flex-wrap gap-3">
             <Link to="/app/review" className="wiki-link-text">
               去拍照搜题 →
             </Link>
@@ -91,7 +88,6 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
       {training.length > 0 ? (
         <section id="training" className="wiki-prose-section">
           <h2 className="wiki-prose-h2">今日训练</h2>
-          <p className="wiki-prose-lead">基于掌握度自动生成</p>
           <ul className="wiki-prose-list">
             {training.map((item, i) => (
               <TrainingRow
@@ -108,7 +104,6 @@ export function KnowledgeTodayPanel({ userId, onTocChange }: KnowledgeTodayPanel
       {patterns.length > 0 ? (
         <section id="patterns" className="wiki-prose-section">
           <h2 className="wiki-prose-h2">错误模式</h2>
-          <p className="wiki-prose-lead">跨多次错题归纳，不是单题记录</p>
           <ul className="wiki-prose-list">
             {patterns.map((p: { subject: string; label: string; occurrence_count: number }) => (
               <li key={`${p.subject}-${p.label}`} className="wiki-prose-row">

@@ -25,6 +25,11 @@ function isLinkActive(
     const urlSubject = typeof search.subject === "string" ? search.subject : undefined;
     return !!item.search?.subject && urlSubject === item.search.subject;
   }
+  if (item.to === "/app/learn") {
+    if (!path.startsWith("/app/learn")) return false;
+    const urlSubject = typeof search.subject === "string" ? search.subject : undefined;
+    return !!item.search?.subject && urlSubject === item.search.subject;
+  }
   return true;
 }
 
@@ -35,6 +40,7 @@ export function WikiSidebarTree({ showAdmin }: WikiSidebarTreeProps) {
   const search = location.search as Record<string, unknown>;
   const [open, setOpen] = useState<Record<string, boolean>>({
     start: true,
+    learn: path.startsWith("/app/learn"),
     review: path.startsWith("/app/review"),
     admin: path.startsWith("/app/admin"),
   });

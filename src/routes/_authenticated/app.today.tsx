@@ -538,9 +538,6 @@ function Today() {
               去复盘 →
             </Link>
           </div>
-          <p className="wiki-prose-lead">
-            每次复盘整理出的任务会留在这里。做完就点「标记完成」。
-          </p>
 
           {archiveError ? (
             <p className="text-sm text-destructive">今晚任务加载失败。</p>
@@ -549,9 +546,7 @@ function Today() {
           ) : archiveLoading && loadDeadlinePassed ? (
             <p className="wiki-prose-sub">加载较慢，请稍后再试或刷新页面。</p>
           ) : archiveRows.length === 0 ? (
-            <p className="wiki-prose-sub">
-              还没有任务。完成第一次复盘并整理今晚任务后，会出现在这里。
-            </p>
+            <p className="wiki-prose-sub">还没有任务。</p>
           ) : (
             <ul className="wiki-prose-list">
               {archiveRows.map((r) => (

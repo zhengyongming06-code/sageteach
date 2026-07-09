@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as DemoRouteImport } from './routes/demo'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthUpdatePasswordRouteImport } from './routes/auth.update-password'
@@ -19,6 +20,7 @@ import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authentic
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
 import { Route as AuthenticatedAppTodayRouteImport } from './routes/_authenticated/app.today'
 import { Route as AuthenticatedAppReviewRouteImport } from './routes/_authenticated/app.review'
+import { Route as AuthenticatedAppLearnRouteImport } from './routes/_authenticated/app.learn'
 import { Route as AuthenticatedAppDiagnosticRouteImport } from './routes/_authenticated/app.diagnostic'
 import { Route as AuthenticatedAppCoachRouteImport } from './routes/_authenticated/app.coach'
 import { Route as AuthenticatedAppReviewArchiveRouteImport } from './routes/_authenticated/app.review.archive'
@@ -37,6 +39,11 @@ const LoginRoute = LoginRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
@@ -73,6 +80,11 @@ const AuthenticatedAppReviewRoute = AuthenticatedAppReviewRouteImport.update({
   path: '/review',
   getParentRoute: () => AuthenticatedAppRoute,
 } as any)
+const AuthenticatedAppLearnRoute = AuthenticatedAppLearnRouteImport.update({
+  id: '/learn',
+  path: '/learn',
+  getParentRoute: () => AuthenticatedAppRoute,
+} as any)
 const AuthenticatedAppDiagnosticRoute =
   AuthenticatedAppDiagnosticRouteImport.update({
     id: '/diagnostic',
@@ -99,6 +111,7 @@ const AuthenticatedAppAdminAnalyticsRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/demo': typeof DemoRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
@@ -107,6 +120,7 @@ export interface FileRoutesByFullPath {
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/app/coach': typeof AuthenticatedAppCoachRoute
   '/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
+  '/app/learn': typeof AuthenticatedAppLearnRoute
   '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
   '/app/admin/analytics': typeof AuthenticatedAppAdminAnalyticsRoute
@@ -114,6 +128,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/demo': typeof DemoRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
@@ -122,6 +137,7 @@ export interface FileRoutesByTo {
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/app/coach': typeof AuthenticatedAppCoachRoute
   '/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
+  '/app/learn': typeof AuthenticatedAppLearnRoute
   '/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/app/today': typeof AuthenticatedAppTodayRoute
   '/app/admin/analytics': typeof AuthenticatedAppAdminAnalyticsRoute
@@ -131,6 +147,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/demo': typeof DemoRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
@@ -139,6 +156,7 @@ export interface FileRoutesById {
   '/auth/update-password': typeof AuthUpdatePasswordRoute
   '/_authenticated/app/coach': typeof AuthenticatedAppCoachRoute
   '/_authenticated/app/diagnostic': typeof AuthenticatedAppDiagnosticRoute
+  '/_authenticated/app/learn': typeof AuthenticatedAppLearnRoute
   '/_authenticated/app/review': typeof AuthenticatedAppReviewRouteWithChildren
   '/_authenticated/app/today': typeof AuthenticatedAppTodayRoute
   '/_authenticated/app/admin/analytics': typeof AuthenticatedAppAdminAnalyticsRoute
@@ -148,6 +166,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/demo'
     | '/forgot-password'
     | '/login'
     | '/signup'
@@ -156,6 +175,7 @@ export interface FileRouteTypes {
     | '/auth/update-password'
     | '/app/coach'
     | '/app/diagnostic'
+    | '/app/learn'
     | '/app/review'
     | '/app/today'
     | '/app/admin/analytics'
@@ -163,6 +183,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/demo'
     | '/forgot-password'
     | '/login'
     | '/signup'
@@ -171,6 +192,7 @@ export interface FileRouteTypes {
     | '/auth/update-password'
     | '/app/coach'
     | '/app/diagnostic'
+    | '/app/learn'
     | '/app/review'
     | '/app/today'
     | '/app/admin/analytics'
@@ -179,6 +201,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/demo'
     | '/forgot-password'
     | '/login'
     | '/signup'
@@ -187,6 +210,7 @@ export interface FileRouteTypes {
     | '/auth/update-password'
     | '/_authenticated/app/coach'
     | '/_authenticated/app/diagnostic'
+    | '/_authenticated/app/learn'
     | '/_authenticated/app/review'
     | '/_authenticated/app/today'
     | '/_authenticated/app/admin/analytics'
@@ -196,6 +220,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
+  DemoRoute: typeof DemoRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
@@ -223,6 +248,13 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -274,6 +306,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppReviewRouteImport
       parentRoute: typeof AuthenticatedAppRoute
     }
+    '/_authenticated/app/learn': {
+      id: '/_authenticated/app/learn'
+      path: '/learn'
+      fullPath: '/app/learn'
+      preLoaderRoute: typeof AuthenticatedAppLearnRouteImport
+      parentRoute: typeof AuthenticatedAppRoute
+    }
     '/_authenticated/app/diagnostic': {
       id: '/_authenticated/app/diagnostic'
       path: '/diagnostic'
@@ -322,6 +361,7 @@ const AuthenticatedAppReviewRouteWithChildren =
 interface AuthenticatedAppRouteChildren {
   AuthenticatedAppCoachRoute: typeof AuthenticatedAppCoachRoute
   AuthenticatedAppDiagnosticRoute: typeof AuthenticatedAppDiagnosticRoute
+  AuthenticatedAppLearnRoute: typeof AuthenticatedAppLearnRoute
   AuthenticatedAppReviewRoute: typeof AuthenticatedAppReviewRouteWithChildren
   AuthenticatedAppTodayRoute: typeof AuthenticatedAppTodayRoute
   AuthenticatedAppAdminAnalyticsRoute: typeof AuthenticatedAppAdminAnalyticsRoute
@@ -330,6 +370,7 @@ interface AuthenticatedAppRouteChildren {
 const AuthenticatedAppRouteChildren: AuthenticatedAppRouteChildren = {
   AuthenticatedAppCoachRoute: AuthenticatedAppCoachRoute,
   AuthenticatedAppDiagnosticRoute: AuthenticatedAppDiagnosticRoute,
+  AuthenticatedAppLearnRoute: AuthenticatedAppLearnRoute,
   AuthenticatedAppReviewRoute: AuthenticatedAppReviewRouteWithChildren,
   AuthenticatedAppTodayRoute: AuthenticatedAppTodayRoute,
   AuthenticatedAppAdminAnalyticsRoute: AuthenticatedAppAdminAnalyticsRoute,
@@ -355,6 +396,7 @@ const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
+  DemoRoute: DemoRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,

@@ -1,9 +1,16 @@
+import type { ReactNode } from "react";
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { ArrowRight, Link2, Moon, Sparkles, type LucideIcon } from "lucide-react";
 import { LandingCapabilityGraph } from "@/components/landing-capability-graph";
 import { SageLogo } from "@/components/sage-logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/lib/auth";
+import {
+  LANDING_OVERVIEW_STEPS,
+  LANDING_PRODUCTS,
+  landingLinkProps,
+  landingProductStatusLabel,
+} from "@/lib/landing-content";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
@@ -13,48 +20,43 @@ export const Route = createFileRoute("/")({
 const visionPillars: { icon: LucideIcon; title: string; desc: string }[] = [
   {
     icon: Link2,
-    title: "把复盘串成一条线",
-    desc: "不只记一道题，而是连接卡点、方法、情绪与下一步行动。",
+    title: "错题 → 知识点",
+    desc: "拍照识题后自动标到具体考点，比如弦长、洛伦兹力圆心，而不是一句「数学弱」。",
   },
   {
     icon: Moon,
-    title: "每天结束后的第二大脑",
-    desc: "回顾今天真正难在哪，安排今晚最小可行任务，第二天继续跟进。",
+    title: "视频 + 练题",
+    desc: "按知识点推 B 站讲解与同类题，先听再练；题库接入后换真题与授权题。",
   },
   {
     icon: Sparkles,
-    title: "持续进化的 AI 教练",
-    desc: "诊断、知识图谱、拍照识题与个性化训练，随你的数据越用越准。",
+    title: "AI 找到真卡点",
+    desc: "对话追问「卡在哪一步」，整理今晚任务，掌握度随练随更新。",
   },
 ];
 
-const products = [
-  {
-    status: "live" as const,
-    title: "学科复盘",
-    desc: "今天哪道题让你卡了最久？说出来，拆开看，把卡点变成可执行的今晚任务。",
-  },
-  {
-    status: "live" as const,
-    title: "AI 教练",
-    desc: "它记得你上次卡在哪，不会每次都从头问你，对话围绕你的真实薄弱点展开。",
-  },
-  {
-    status: "live" as const,
-    title: "提分规划",
-    desc: "离目标还差多少分，先搞清楚该把时间花在哪，而不是盲目刷题。",
-  },
-  {
-    status: "preview" as const,
-    title: "知识追踪",
-    desc: "拍照识题后自动抽取知识点，逐步建立你的个人知识图谱与掌握度。",
-  },
-] as const;
-
-function productStatusLabel(status: (typeof products)[number]["status"]) {
-  if (status === "live") return "已上线";
-  if (status === "preview") return "预览中";
-  return "规划中";
+function ProductCtaLink({
+  target,
+  children,
+  className,
+}: {
+  target: (typeof LANDING_PRODUCTS)[number]["target"];
+  children: ReactNode;
+  className?: string;
+}) {
+  const props = landingLinkProps(target);
+  if (props.to === "/signup") {
+    return (
+      <Link to="/signup" className={className}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <Link to="/demo" hash={props.hash} className={className}>
+      {children}
+    </Link>
+  );
 }
 
 function SessionCheck() {
@@ -81,8 +83,10 @@ function Landing() {
         <div className="sy-header-actions">
           <nav className="sy-nav-links max-sm:hidden" aria-label="主导航">
             <a href="#vision">愿景</a>
+            <a href="#overview">流程</a>
             <a href="#products">功能</a>
-            <a href="#access">开始使用</a>
+            <Link to="/demo">示例</Link>
+            <a href="#contact">联系</a>
             <Link to="/login">登录</Link>
           </nav>
           <ThemeToggle />
@@ -97,29 +101,26 @@ function Landing() {
           <div className="sy-hero-copy">
             <div className="sy-hero-headline">
               <p className="sy-eyebrow sy-hero-eyebrow">
-                <span className="sy-latin">AI</span> 学习复盘 · 中高考备考
+                拍错题 · 推视频 · 练同类题 · <span className="sy-latin">AI</span> 辅学
               </p>
               <h1 id="hero-title" className="sy-h1 text-balance">
-                把今天卡住的那道题，
+                拍一道错题，
                 <br />
-                连进你的知识体系。
+                搞定一个知识点。
               </h1>
             </div>
             <p className="sy-lead">
-              Sage 不会说「你一定可以」。它会和你一起，找出今天那道题为什么卡住，
-              告诉你今晚先做什么，再决定明天的方向。
+              Sage 从你做错的题里抽出具体考点，推荐 B 站讲解与同类练手题，
+              再用对话帮你找到「真不懂的那一步」——不是盲目刷题。
             </p>
             <div className="sy-hero-actions">
               <Link to="/signup" className="sy-button sy-button-primary">
                 免费注册 <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
-              <Link to="/login" className="sy-button sy-button-secondary">
-                已有账号登录
+              <Link to="/demo" className="sy-button sy-button-secondary">
+                看弦长题示例
               </Link>
             </div>
-            <p className="sy-access-note">
-              学科复盘、AI 教练与每日训练已开放。知识追踪与诊断模块持续完善中。
-            </p>
           </div>
           <div className="sy-hero-visual">
             <LandingCapabilityGraph />
@@ -129,10 +130,7 @@ function Landing() {
         <section id="vision" className="sy-section sy-section-vision sy-vision-band px-4 sm:px-0">
           <div className="sy-vision-header">
             <p className="sy-eyebrow">愿景</p>
-            <h2 className="sy-h2">连接的复盘，而不是散落的笔记。</h2>
-            <p className="sy-vision-lead">
-              让备考学习更连贯、更可执行、更可追踪——每次复盘都指向下一步行动。
-            </p>
+            <h2 className="sy-h2">一道错题，一条搞定路径。</h2>
           </div>
           <ul className="sy-vision-pillars">
             {visionPillars.map(({ icon: Icon, title, desc }) => (
@@ -147,16 +145,38 @@ function Landing() {
           </ul>
         </section>
 
+        <section id="overview" className="sy-section sy-section-overview px-4 sm:px-0">
+          <div className="sy-section-heading-stacked">
+            <p className="sy-eyebrow">流程</p>
+            <h2 className="sy-h2">从拍错题到真懂，四步闭环。</h2>
+          </div>
+          <div className="sy-overview-shell">
+            <ol className="sy-overview-steps">
+              {LANDING_OVERVIEW_STEPS.map((step) => (
+                <li key={step.step} className="sy-overview-step">
+                  <span className="sy-overview-step-num sy-latin">{step.step}</span>
+                  <div>
+                    <h3>{step.title}</h3>
+                    <p>{step.desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="sy-overview-demo-cta">
+              <Link to="/demo" hash="capture" className="sy-button sy-button-secondary sy-overview-demo-btn">
+                打开闭环示例 <ArrowRight className="h-4 w-4" aria-hidden />
+              </Link>
+            </div>
+          </div>
+        </section>
+
         <section id="products" className="sy-section sy-section-products px-4 sm:px-0">
           <div className="sy-section-heading-stacked">
             <p className="sy-eyebrow">功能</p>
-            <h2 className="sy-h2">Sage 能帮你做什么</h2>
-            <p className="sy-section-kicker">
-              从每日复盘出发，逐步扩展为完整的学习支持系统。
-            </p>
+            <h2 className="sy-h2">围绕一个知识点的四件事</h2>
           </div>
           <div className="sy-product-grid">
-            {products.map((p) => (
+            {LANDING_PRODUCTS.map((p) => (
               <article
                 key={p.title}
                 className={cn(
@@ -171,10 +191,13 @@ function Landing() {
                     p.status === "preview" && "sy-status-preview",
                   )}
                 >
-                  {productStatusLabel(p.status)}
+                  {landingProductStatusLabel(p.status)}
                 </span>
                 <h3>{p.title}</h3>
                 <p>{p.desc}</p>
+                <ProductCtaLink target={p.target} className="sy-product-cta">
+                  {p.cta} <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                </ProductCtaLink>
               </article>
             ))}
           </div>
@@ -183,13 +206,9 @@ function Landing() {
         <section id="access" className="sy-section sy-access-band sy-access-layout px-4 sm:px-0">
           <div className="sy-section-intro">
             <p className="sy-eyebrow">开始使用</p>
-            <h2 className="sy-h2">现在注册，开始今天的复盘。</h2>
+            <h2 className="sy-h2">注册，拍第一道错题。</h2>
           </div>
           <div className="sy-access-right">
-            <p className="sy-section-copy sy-access-blurb">
-              注册后即可使用学科复盘、AI 对话教练与每日训练。拍照识题与知识追踪功能正在预览期，
-              我们会根据你的反馈持续优化。
-            </p>
             <div className="sy-hero-actions">
               <Link to="/signup" className="sy-button sy-button-primary">
                 免费注册 <ArrowRight className="h-4 w-4" aria-hidden />
@@ -200,11 +219,21 @@ function Landing() {
             </div>
           </div>
         </section>
+
+        <section id="contact" className="sy-section sy-contact-section px-4 sm:px-0">
+          <div className="sy-section-intro">
+            <p className="sy-eyebrow">联系</p>
+            <h2 className="sy-h2">反馈、合作或学校试用。</h2>
+          </div>
+          <a href="mailto:Jas-4ever@outlook.com" className="sy-contact-link sy-latin">
+            Jas-4ever@outlook.com
+          </a>
+        </section>
       </main>
 
       <footer className="sy-site-footer px-4 sm:px-0">
         <p className="m-0 max-w-2xl leading-relaxed">
-          Sage — AI 学习复盘教练，帮助中高考学生把每天的卡点变成可执行的进步。
+          Sage — 拍错题、推视频、练同类题、AI 辅学，帮高中生搞定每一个知识点。
         </p>
         <p className="sy-latin m-0 shrink-0">© Sage</p>
       </footer>

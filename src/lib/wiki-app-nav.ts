@@ -24,6 +24,19 @@ export const WIKI_NAV_GROUPS: WikiNavGroup[] = [
     ],
   },
   {
+    id: "learn",
+    label: "辅学",
+    children: [
+      { id: "learn-hub", label: "我的考点", to: "/app/learn" },
+      ...SUBJECTS.map((s) => ({
+        id: `learn-${s}`,
+        label: s,
+        to: "/app/learn",
+        search: { subject: s },
+      })),
+    ],
+  },
+  {
     id: "review",
     label: "复盘",
     children: SUBJECTS.map((s) => ({
