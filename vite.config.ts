@@ -4,20 +4,31 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
-/** Load stylesheet before the module script so first paint is styled. */
-function cssBeforeJs(): Plugin {
+/** CSS in head, single JS module at end of body; strip crossorigin for WeChat webview. */
+function wechatBuildCompat(): Plugin {
   return {
-    name: "css-before-js",
+    name: "wechat-build-compat",
     transformIndexHtml: {
       order: "post",
       handler(html) {
-        const link = html.match(/<link rel="stylesheet"[^>]+>/);
-        const script = html.match(/<script type="module"[^>]+><\/script>/);
-        if (!link || !script) return html;
-        return html
-          .replace(link[0], "")
-          .replace(script[0], "")
-          .replace("</head>", `    ${link[0]}\n    ${script[0]}\n  </head>`);
+        const links = [...html.matchAll(/<link rel="stylesheet"[^>]+>/g)].map((m) => m[0]);
+        const scripts = [...html.matchAll(/<script type="module"[^>]+><\/script>/g)].map(
+          (m) => m[0],
+        );
+
+        let out = html.replace(/ crossorigin/g, "");
+        out = out.replace(/<link rel="stylesheet"[^>]+>\n?/g, "");
+        out = out.replace(/<script type="module"[^>]+><\/script>\n?/g, "");
+
+        if (links.length > 0) {
+          const cleanLink = links[links.length - 1]!.replace(/ crossorigin/g, "");
+          out = out.replace("</head>", `    ${cleanLink}\n  </head>`);
+        }
+        if (scripts.length > 0) {
+          const cleanScript = scripts[scripts.length - 1]!.replace(/ crossorigin/g, "");
+          out = out.replace("</body>", `    ${cleanScript}\n  </body>`);
+        }
+        return out;
       },
     },
   };
@@ -33,11 +44,13 @@ export default defineConfig({
     react(),
     tailwindcss(),
     tsconfigPaths(),
-    cssBeforeJs(),
+    wechatBuildCompat(),
   ],
   build: {
     outDir: "dist",
-    target: ["es2020", "chrome64", "safari12"],
+    // Conservative targets for WeChat in-app browser (iOS WKWebView / Android X5).
+    target: "es2018",
+    cssTarget: "chrome61",
     modulePreload: false,
   },
   publicDir: "public",

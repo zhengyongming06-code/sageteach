@@ -20,16 +20,14 @@ const supabaseUrl = import.meta.env.PROD
 // PostgREST uses anon JWT + user's Authorization Bearer from auth.getSession().
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
-if (!supabaseUrl) {
-  throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_PROJECT_ID");
-}
-if (!supabaseKey) {
-  const message = "Missing VITE_SUPABASE_ANON_KEY (anon JWT required).";
-  console.error(`[Supabase] ${message}`);
-  throw new Error(message);
-}
-
 function createSupabaseClient() {
+  if (!supabaseUrl) {
+    throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_PROJECT_ID");
+  }
+  if (!supabaseKey) {
+    throw new Error("Missing VITE_SUPABASE_ANON_KEY (anon JWT required).");
+  }
+
   return createClient<Database>(supabaseUrl, supabaseKey, {
     auth: {
       persistSession: true,

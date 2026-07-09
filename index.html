@@ -57,6 +57,30 @@
         加载中…
       </div>
     </div>
+    <script>
+      (function () {
+        function showBootFail(title) {
+          var root = document.getElementById("root");
+          if (!root || !document.getElementById("boot-splash")) return;
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font-family:system-ui,-apple-system,\'PingFang SC\',sans-serif;background:#f9fafb;color:#334155">' +
+            '<p style="font-size:16px;font-weight:600;margin:0 0 8px">' +
+            title +
+            "</p>" +
+            '<p style="font-size:13px;line-height:1.6;color:#64748b;margin:0">微信内可能无法完整加载。请点右上角 ··· →「在浏览器中打开」，或用 Safari / Chrome 访问 sageteach.top</p>' +
+            '<button type="button" onclick="location.reload()" style="margin-top:20px;padding:10px 18px;border:0;border-radius:10px;background:#0f172a;color:#fff;font-size:14px">刷新重试</button></div>';
+        }
+        window.addEventListener("error", function () {
+          showBootFail("页面加载失败");
+        });
+        window.addEventListener("unhandledrejection", function () {
+          showBootFail("页面加载失败");
+        });
+        setTimeout(function () {
+          if (document.getElementById("boot-splash")) showBootFail("加载超时");
+        }, 15000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
