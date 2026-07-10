@@ -11,6 +11,7 @@ import {
   normalizePhotoMarkdown,
   sanitizePhotoMarkdownForDisplay,
   stripHiddenQuizKeysFromMarkdown,
+  stripQuizBlocksFromMarkdown,
 } from "@/lib/photo-analysis-markdown";
 import { recognizeQuestionPhoto } from "@/lib/photo-analysis-recognition";
 
@@ -49,30 +50,14 @@ export const QUESTION_PHOTO_SYSTEM_PROMPT = `你是高考/大学学习助教。�
 3. 【计算/解答题】（数学、物理、化学等需要推导计算的题）
    定位：辅导入口，不是算题机。优先「题型 + 方法框架 + 关键一步」，不要长数值推导。
    用 markdown 输出：
-   - ## 题型判断（1 句话，如：椭圆与直线联立求弦长）
-   - ## 方法框架（最多 **3** 个步骤，每个用 ## 步骤1：标题 单独一行；每步只写 1～2 句「做什么」，**禁止**具体数字代入与多步连锁等式）
-   - ## 关键一步（最容易错或最决定方向的一步；最多 1 个关键公式，不要展开算到底）
-   - ### 核心知识点（- 列表，每条一行）
-   - 行内公式 $...$，独立公式 $$...$$（公式总数不宜过多，优先方法性公式）
-   - 最后出 **3 道**选择题，考查解题思路和方法判断，而不是具体数值计算。例如：
-     - 「求椭圆弦长时，以下哪个步骤是必须的？」
-     - 「以下哪种情况下韦达定理可以使用？」
-     这类题 AI 不易算错，也更利于巩固解题思路。
-   每题必须用以下块（不要用 ### 巩固题 标题）。
-   巩固题**先只出题**，答案与解析放在紧随其后的隐藏块（界面不会直接展示，学生点选选项后由前端判分并展示解析）：
-
---- QUIZ ---
-本题考查[具体考点]，与原题相同
-题目：xxx
-A. xxx
-B. xxx
-C. xxx
-D. xxx
---- END QUIZ ---
---- QUIZ KEY ---
-答案：B
-解析：xxx
---- END QUIZ KEY ---
+   - 若有多道独立题或 (1)(2)(3) 小问：**每一问**用 ## 第(1)问 等标题分别输出方法框架与关键一步，禁止只讲第一问
+   - 单一整题时：
+     - ## 题型判断（1 句话，如：椭圆与直线联立求弦长）
+     - ## 方法框架（最多 **3** 个步骤，每个用 ## 步骤1：标题 单独一行；每步只写 1～2 句「做什么」，**禁止**具体数字代入与多步连锁等式）
+     - ## 关键一步（最容易错或最决定方向的一步；最多 1 个关键公式，不要展开算到底）
+     - ### 核心知识点（- 列表，每条一行）
+   - 行内公式 $...$，独立公式 $$...$$（**禁止**裸写 \\frac 等；公式总数不宜过多，优先方法性公式）
+   - **禁止**输出 --- QUIZ --- 巩固题（练题在辅学板块）
 
    【圆锥曲线 / 导数 / 解析几何 / 多步计算题】硬性要求：
    - **禁止**展开联立、消元、判别式、韦达代入后的完整计算链
@@ -88,27 +73,17 @@ D. xxx
    用 markdown 输出：
    - ## 答题要点（分点列出）
    - ### 相关知识点（- 列表）
-   - 最后出 **2 道**选择题，考查相关概念的理解与方法判断（不要出需要精确数值计算的题）：格式同类型 3（--- QUIZ --- 只含题目与选项，--- QUIZ KEY --- 含答案与解析）。
+   - **禁止**输出 --- QUIZ --- 巩固题
 
 通用要求：
 - 绝对不要把所有内容挤在同一段；段落之间空一行。
-- 仅类型 3、4 才输出 --- QUIZ ---；类型 1、2 禁止输出任何巩固题。
 - 不要用 JSON，不要用代码块包裹整段回复。
-- QUIZ 块内：本题考查行、题目、A/B/C/D 各占一行；**禁止**在 QUIZ 块内写答案、解析或解题过程。
-- QUIZ KEY 块内：答案、解析各占一行；答案行只写单个大写字母（如 B）；每道 QUIZ 必须紧跟一个 QUIZ KEY。
-- 生成巩固题时，**绝对不能**在题目文字或选项里出现答案、最终结论或完整解题过程。
-- 巩固题先只输出题目和选项；答案字段只写字母；解析写在 QUIZ KEY 里供前端在用户作答后展示，不要在 QUIZ 块里输出解析。
+- 所有类型均**禁止**输出 --- QUIZ --- 或巩固选择题。${SAGE_MCQ_GENERATION_SAFETY_SUFFIX}`;
 
-【重要】巩固题须考查与原题相同的核心考点，但用「思路/方法/概念判断」选择题呈现：
-- 如果原题是圆锥曲线求弦长，巩固题应考「求弦长的关键步骤或可用定理」，不要另出一道需要从头算数的弦长计算题
-- 如果原题是交替级数收敛判断，巩固题应考同类收敛判别思路或方法选择
-- 禁止出现与原题考点无关的题目
-- 每道巩固题出题前先说明：本题考查[具体考点]，与原题相同${SAGE_MCQ_GENERATION_SAFETY_SUFFIX}`;
-
-export { normalizePhotoMarkdown, sanitizePhotoMarkdownForDisplay, stripHiddenQuizKeysFromMarkdown };
+export { normalizePhotoMarkdown, sanitizePhotoMarkdownForDisplay, stripHiddenQuizKeysFromMarkdown, stripQuizBlocksFromMarkdown };
 
 export function wrapPhotoMarkdown(markdown: string): string {
-  return SAGE_PHOTO_MD_MARKER + normalizePhotoMarkdown(markdown);
+  return SAGE_PHOTO_MD_MARKER + stripQuizBlocksFromMarkdown(normalizePhotoMarkdown(markdown));
 }
 
 export function unwrapPhotoMarkdown(content: string): {
@@ -118,7 +93,7 @@ export function unwrapPhotoMarkdown(content: string): {
   if (content.startsWith(SAGE_PHOTO_MD_MARKER)) {
     return {
       isPhotoAnalysis: true,
-      markdown: normalizePhotoMarkdown(content.slice(SAGE_PHOTO_MD_MARKER.length)),
+      markdown: sanitizePhotoMarkdownForDisplay(content.slice(SAGE_PHOTO_MD_MARKER.length)),
     };
   }
   if (content.startsWith(SAGE_PHOTO_ANALYSIS_MARKER)) {
@@ -184,7 +159,9 @@ export async function analyzeQuestionPhoto(
   }
   const hint = userHint.trim() || "请识别并分析图片中的题目。";
   const multiHint =
-    urls.length > 1 ? `${hint}\n\n（共 ${urls.length} 张图片，请综合所有图片中的题目内容分析。）` : hint;
+    urls.length > 1
+      ? `${hint}\n\n（共 ${urls.length} 张图片：请识别每张图上的全部题目；若含 (1)(2)(3) 小问须逐问分别讲解，禁止只讲第一问。）`
+      : `${hint}\n\n（若图中有多道独立题或 (1)(2)(3) 小问，须逐问分别讲解，禁止只讲第一问。）`;
 
   const cacheHash = await hashPhotoAnalysisInput(urls, hint);
   const cached = getCachedPhotoAnalysis(cacheHash);
@@ -205,12 +182,14 @@ export async function analyzeQuestionPhoto(
       onDelta: options?.onDelta,
     });
 
-    setCachedPhotoAnalysis(cacheHash, markdown);
-    return markdown;
+    const cleaned = sanitizePhotoMarkdownForDisplay(markdown);
+    setCachedPhotoAnalysis(cacheHash, cleaned);
+    return cleaned;
   } catch (pipelineErr) {
     console.warn("[photo-analysis] pipeline fallback to legacy VL", pipelineErr);
     const markdown = await analyzeQuestionPhotoLegacyVl(urls, multiHint, options);
-    setCachedPhotoAnalysis(cacheHash, markdown);
-    return markdown;
+    const cleaned = sanitizePhotoMarkdownForDisplay(markdown);
+    setCachedPhotoAnalysis(cacheHash, cleaned);
+    return cleaned;
   }
 }

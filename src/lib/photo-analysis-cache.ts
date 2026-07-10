@@ -1,4 +1,4 @@
-const CACHE_KEY = "sage_photo_analysis_v1";
+const CACHE_KEY = "sage_photo_analysis_v2";
 const TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 40;
 
