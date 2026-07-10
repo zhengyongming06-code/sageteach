@@ -27,19 +27,33 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+  const msg = error.message ?? "";
+  const isChunkLoad =
+    /Failed to fetch dynamically imported module|Importing a module script failed|MIME type/i.test(msg);
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold text-foreground">页面加载失败</h1>
-        <p className="mt-2 text-sm text-muted-foreground">先深呼吸，再试一次。</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {isChunkLoad
+            ? "静态资源版本不一致或缓存过期。请强制刷新（Ctrl+Shift+R），或在手机浏览器清除站点数据后重试。"
+            : "先深呼吸，再试一次。"}
+        </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            刷新
+          </button>
           <button
             type="button"
             onClick={() => {
               void router.invalidate();
               reset();
             }}
-            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="rounded-xl border border-border bg-background px-4 py-2 text-sm"
           >
             重试
           </button>

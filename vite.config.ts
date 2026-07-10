@@ -48,8 +48,8 @@ export default defineConfig({
   /** Expose ERNIE_API_KEY to the client for Review photo analysis (see ernie-vl.ts). */
   envPrefix: ["VITE_", "ERNIE_"],
   plugins: [
-    // Route-level code split ? first paint ~640KB JS (not ~2.2MB); required for mobile CN networks.
-    TanStackRouterVite({ target: "react", autoCodeSplitting: true }),
+    // Single bundle ? avoids lazy chunk MIME failures when SPA fallback serves index.html for /assets/*.
+    TanStackRouterVite({ target: "react", autoCodeSplitting: false }),
     react(),
     tailwindcss(),
     tsconfigPaths(),
