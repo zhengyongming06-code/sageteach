@@ -14,15 +14,11 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  subjectAccentTaskClass,
-} from "@/lib/subject-accent";
-import { KnowledgeTodayPanel } from "@/components/knowledge-today-panel";
+import { TodayPracticeQueue } from "@/components/today-practice-queue";
 import { TodayPageRail, type TodayTocSection } from "@/components/today-page-rail";
 import { SAGE_KNOWLEDGE_REFRESH_EVENT } from "@/lib/knowledge-tracking/ingest-client";
 import {
   fetchWeakArchive,
-  formatArchiveDateLabel,
   persistTaskCompletion,
   weakArchiveQueryKey,
   type WeakArchiveRow,
@@ -99,13 +95,10 @@ function Today() {
   const celebrateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [diagnosticBannerDismissed, setDiagnosticBannerDismissed] = useState(false);
   const [knowledgeToc, setKnowledgeToc] = useState<TodayTocSection[]>([]);
+  const [topPracticeTask, setTopPracticeTask] = useState<string | null>(null);
 
   const tocSections = useMemo<TodayTocSection[]>(
-    () => [
-      { id: "overview", label: "概览" },
-      ...knowledgeToc,
-      { id: "archive", label: "今晚任务" },
-    ],
+    () => [{ id: "overview", label: "概览" }, ...knowledgeToc],
     [knowledgeToc],
   );
 
@@ -434,16 +427,14 @@ function Today() {
     <div className="wiki-page-grid">
       <article className="wiki-prose wiki-prose-sheet">
         <nav className="wiki-breadcrumb" aria-label="面包屑">
-          <Link to="/app/today">Home</Link>
+          <Link to="/app/today">今日</Link>
           <span className="wiki-breadcrumb-sep">›</span>
-          <Link to="/app/today">Today</Link>
-          <span className="wiki-breadcrumb-sep">›</span>
-          <span className="text-[var(--wiki-nav-fg)]">Overview</span>
+          <span className="text-[var(--wiki-nav-fg)]">概览</span>
         </nav>
 
         <header id="overview" className="wiki-prose-section !mt-0">
           <h1 className="wiki-page-title">
-            {examSprint ? `还有 ${examCountdownDays} 天` : "Today"}
+            {examSprint ? `还有 ${examCountdownDays} 天` : "今日"}
           </h1>
           <div className="wiki-meta-row">
             <span>{greet}</span>
@@ -487,9 +478,16 @@ function Today() {
             </div>
           ) : null}
           {!examSprint ? (
-            <p className="mt-4 text-base leading-relaxed text-[var(--wiki-fg)]">
-              今天，从最重要的一件事开始。
-            </p>
+            topPracticeTask ? (
+              <p className="mt-4 text-base leading-relaxed text-[var(--wiki-fg)]">
+                今晚先做：
+                <span className="font-medium text-[var(--wiki-heading)]"> {topPracticeTask}</span>
+              </p>
+            ) : (
+              <p className="mt-4 text-base leading-relaxed text-[var(--wiki-fg)]">
+                今天，从最重要的一件事开始。
+              </p>
+            )
           ) : (
             <p className="mt-4 text-base leading-relaxed text-[var(--wiki-fg)]">
               冲刺阶段——今天只做一件事。
@@ -528,70 +526,18 @@ function Today() {
         ) : null}
 
         {user?.id ? (
-          <KnowledgeTodayPanel userId={user.id} onTocChange={setKnowledgeToc} />
+          <TodayPracticeQueue
+            userId={user.id}
+            archiveRows={archiveRows}
+            archiveLoading={archiveLoading}
+            archiveError={archiveError}
+            loadDeadlinePassed={loadDeadlinePassed}
+            onArchiveComplete={onArchiveCheck}
+            celebrateId={archiveCelebrateId}
+            onTocChange={setKnowledgeToc}
+            onTopTaskChange={setTopPracticeTask}
+          />
         ) : null}
-
-        <section id="archive" className="wiki-prose-section">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="wiki-prose-h2">今晚任务</h2>
-            <Link to="/app/review" className="wiki-link-text shrink-0">
-              去复盘 →
-            </Link>
-          </div>
-
-          {archiveError ? (
-            <p className="text-sm text-destructive">今晚任务加载失败。</p>
-          ) : archiveLoading && !loadDeadlinePassed ? (
-            <p className="wiki-prose-sub">加载中…</p>
-          ) : archiveLoading && loadDeadlinePassed ? (
-            <p className="wiki-prose-sub">加载较慢，请稍后再试或刷新页面。</p>
-          ) : archiveRows.length === 0 ? (
-            <p className="wiki-prose-sub">还没有任务。</p>
-          ) : (
-            <ul className="wiki-prose-list">
-              {archiveRows.map((r) => (
-                <li key={r.id} className={cn(subjectAccentTaskClass(r.subject))}>
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <time className="wiki-prose-sub text-xs tabular-nums" dateTime={r.session_date}>
-                          {formatArchiveDateLabel(r.session_date, r.created_at)}
-                        </time>
-                        <span className="wiki-tag">{r.subject}</span>
-                      </div>
-                      <p
-                        className={cn(
-                          "mt-1.5 text-sm font-medium leading-snug text-[var(--wiki-fg)]",
-                          r.completed && "text-[var(--wiki-muted)] line-through",
-                        )}
-                      >
-                        {r.tonight_task}
-                      </p>
-                      <p
-                        className={cn(
-                          "mt-1 text-xs text-[var(--wiki-nav-fg)]",
-                          r.completed && "line-through opacity-80",
-                        )}
-                      >
-                        卡在 {r.weak_point}
-                      </p>
-                      {archiveCelebrateId === r.id ? (
-                        <p className="mt-2 text-sm text-[var(--wiki-nav-fg)]">✓ 搞定了这个卡点</p>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      className="wiki-inline-action"
-                      onClick={() => onArchiveCheck(r.id, !r.completed)}
-                    >
-                      {r.completed ? "取消完成" : "标记完成"}
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </article>
 
       <TodayPageRail

@@ -15,7 +15,9 @@ import { recordProductAnalyticsEvent } from "@/lib/analytics/api";
 import { SageChatPanel, type SageChatMessage, type SageChatPanelHandle } from "@/components/sage-chat-panel";
 import { ReviewSummaryCard } from "@/components/review-summary-card";
 import {
+  MAX_PENDING_CHAT_IMAGES,
   revokePendingChatImage,
+  revokePendingChatImages,
   type PendingChatImage,
 } from "@/components/chat-image-picker";
 import { compressImageToDataUrl } from "@/lib/image-compress";
@@ -290,7 +292,7 @@ function Review() {
   const [subject, setSubject] = useState<string>(SUBJECTS[0]);
   const [selectedDate, setSelectedDate] = useState(() => localYmd());
   const chatPanelRef = useRef<SageChatPanelHandle>(null);
-  const [pendingImage, setPendingImage] = useState<PendingChatImage | null>(null);
+  const [pendingImages, setPendingImages] = useState<PendingChatImage[]>([]);
   const [streamingPhotoMarkdown, setStreamingPhotoMarkdown] = useState<string | null>(null);
   const [photoAnalysisLoading, setPhotoAnalysisLoading] = useState(false);
   const [photoRemediationByMessageId, setPhotoRemediationByMessageId] = useState<
@@ -460,9 +462,9 @@ function Review() {
     sendAbortRef.current = null;
     setStreamAssistantText(null);
     chatPanelRef.current?.clearInput();
-    setPendingImage((prev) => {
-      revokePendingChatImage(prev);
-      return null;
+    setPendingImages((prev) => {
+      revokePendingChatImages(prev);
+      return [];
     });
     setStreamingPhotoMarkdown(null);
     setPhotoAnalysisLoading(false);
@@ -491,9 +493,9 @@ function Review() {
       setIsEndingReview(false);
       setStreamAssistantText(null);
       chatPanelRef.current?.clearInput();
-      setPendingImage((prev) => {
-        revokePendingChatImage(prev);
-        return null;
+      setPendingImages((prev) => {
+        revokePendingChatImages(prev);
+        return [];
       });
       setStreamingPhotoMarkdown(null);
       setPhotoAnalysisLoading(false);
@@ -565,17 +567,36 @@ function Review() {
     ],
   );
 
-  const handleImageSelected = useCallback((image: PendingChatImage) => {
-    setPendingImage((prev) => {
-      revokePendingChatImage(prev);
-      return image;
+  const handleImagesSelected = useCallback((incoming: PendingChatImage[]) => {
+    if (incoming.length === 0) return;
+    setPendingImages((prev) => {
+      const room = MAX_PENDING_CHAT_IMAGES - prev.length;
+      if (room <= 0) {
+        toast.message(`最多添加 ${MAX_PENDING_CHAT_IMAGES} 张图片`);
+        revokePendingChatImages(incoming);
+        return prev;
+      }
+      const toAdd = incoming.slice(0, room);
+      if (incoming.length > room) {
+        revokePendingChatImages(incoming.slice(room));
+        toast.message(`最多 ${MAX_PENDING_CHAT_IMAGES} 张，已添加 ${toAdd.length} 张`);
+      }
+      return [...prev, ...toAdd];
     });
   }, []);
 
-  const handleClearImage = useCallback(() => {
-    setPendingImage((prev) => {
-      revokePendingChatImage(prev);
-      return null;
+  const handleRemoveImage = useCallback((id: string) => {
+    setPendingImages((prev) => {
+      const target = prev.find((image) => image.id === id);
+      revokePendingChatImage(target);
+      return prev.filter((image) => image.id !== id);
+    });
+  }, []);
+
+  const handleClearImages = useCallback(() => {
+    setPendingImages((prev) => {
+      revokePendingChatImages(prev);
+      return [];
     });
   }, []);
 
@@ -1224,17 +1245,23 @@ function Review() {
   ]);
 
   const send = useCallback(async (draftText: string) => {
-    const imageSnapshot = pendingImage;
+    const imageSnapshot = pendingImages;
     const text = draftText.trim();
-    const userText = text || (imageSnapshot ? "请帮我分析这道题目" : "");
+    const userText =
+      text ||
+      (imageSnapshot.length > 0
+        ? imageSnapshot.length > 1
+          ? "请帮我分析这些题目"
+          : "请帮我分析这道题目"
+        : "");
     if (!userText || !user?.id || isSending) return;
 
-    if (!imageSnapshot && isPhotoQuizRevealRequest(userText)) {
+    if (imageSnapshot.length === 0 && isPhotoQuizRevealRequest(userText)) {
       toast.message("请直接在巩固题上点击选项，系统会自动判分并显示解析。");
       return;
     }
 
-    if (imageSnapshot) {
+    if (imageSnapshot.length > 0) {
       setPhotoAnalysisLoading(true);
       setStreamingPhotoMarkdown(null);
       setStreamAssistantText(null);
@@ -1265,10 +1292,12 @@ function Review() {
     try {
       if (scopeStale()) return;
 
-      let photoDataUrl: string | null = null;
-      if (imageSnapshot) {
+      let photoDataUrls: string[] = [];
+      if (imageSnapshot.length > 0) {
         try {
-          photoDataUrl = await compressImageToDataUrl(imageSnapshot.file);
+          photoDataUrls = await Promise.all(
+            imageSnapshot.map((image) => compressImageToDataUrl(image.file)),
+          );
         } catch (compressErr) {
           setStreamingPhotoMarkdown(null);
           setPhotoAnalysisLoading(false);
@@ -1278,10 +1307,11 @@ function Review() {
           if (text) chatPanelRef.current?.setInputValue(text);
           return;
         }
-        handleClearImage();
+        handleClearImages();
       }
 
-      const userMessageContent = imageSnapshot && !text ? SAGE_PHOTO_MESSAGE_MARKER : userText;
+      const userMessageContent =
+        imageSnapshot.length > 0 && !text ? SAGE_PHOTO_MESSAGE_MARKER : userText;
 
       const { data: userRow, error: uErr } = await supabase
         .from("coach_messages")
@@ -1304,7 +1334,7 @@ function Review() {
 
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
 
-      if (imageSnapshot && photoDataUrl) {
+      if (imageSnapshot.length > 0 && photoDataUrls.length > 0) {
         if (scopeStale()) return;
 
         let streamRaf = 0;
@@ -1317,7 +1347,7 @@ function Review() {
 
         let markdown: string;
         try {
-          markdown = await analyzeQuestionPhoto(photoDataUrl, userText, {
+          markdown = await analyzeQuestionPhoto(photoDataUrls, userText, {
             signal: abortController.signal,
             onDelta: (accumulated) => {
               pendingMarkdown = normalizePhotoMarkdown(accumulated);
@@ -1525,7 +1555,7 @@ function Review() {
       slugNavSourceRef.current = "control";
     }
   }, [
-    pendingImage,
+    pendingImages,
     user?.id,
     isSending,
     chatSubject,
@@ -1537,7 +1567,7 @@ function Review() {
     applyActiveSessionSlug,
     runSilentSummary,
     subjectsWithEndedReview,
-    handleClearImage,
+    handleClearImages,
     loadHistory,
     beginReviewScope,
   ]);
@@ -1764,9 +1794,9 @@ function Review() {
       streamingAssistantText={streamAssistantText}
       composerHint={chatRetrying ? "重试中…" : null}
       onWrapUpDetected={prefetchSummary}
-      pendingImage={pendingImage}
-      onImageSelected={handleImageSelected}
-      onClearImage={handleClearImage}
+      pendingImages={pendingImages}
+      onImagesSelected={handleImagesSelected}
+      onRemoveImage={handleRemoveImage}
       photoAnalysisLoading={photoAnalysisLoading}
       streamingPhotoMarkdown={streamingPhotoMarkdown}
       photoRemediationByMessageId={photoRemediationByMessageId}

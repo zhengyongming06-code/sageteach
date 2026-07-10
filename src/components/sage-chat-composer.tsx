@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   ChatImageAttachButton,
-  ChatImagePreview,
+  ChatImagePreviewStrip,
+  MAX_PENDING_CHAT_IMAGES,
   type PendingChatImage,
 } from "@/components/chat-image-picker";
 
@@ -32,9 +33,9 @@ type SageChatComposerProps = {
   isSending: boolean;
   placeholder: string;
   isMobile: boolean;
-  pendingImage?: PendingChatImage | null;
-  onImageSelected?: (image: PendingChatImage) => void;
-  onClearImage?: () => void;
+  pendingImages?: PendingChatImage[];
+  onImagesSelected?: (images: PendingChatImage[]) => void;
+  onRemoveImage?: (id: string) => void;
   onOptimisticSend?: (payload: { text: string; previewUrl?: string }) => void;
 };
 
@@ -45,9 +46,9 @@ export const SageChatComposer = memo(
       isSending,
       placeholder,
       isMobile,
-      pendingImage = null,
-      onImageSelected,
-      onClearImage,
+      pendingImages = [],
+      onImagesSelected,
+      onRemoveImage,
       onOptimisticSend,
     }: SageChatComposerProps,
     ref: Ref<SageChatComposerHandle>,
@@ -59,41 +60,47 @@ export const SageChatComposer = memo(
       clearInput: () => setInputValue(""),
     }));
 
-    const canSubmit = Boolean(inputValue.trim() || pendingImage) && !isSending;
-    const imagePickerEnabled = Boolean(onImageSelected && onClearImage);
+    const hasImages = pendingImages.length > 0;
+    const canSubmit = Boolean(inputValue.trim() || hasImages) && !isSending;
+    const imagePickerEnabled = Boolean(onImagesSelected && onRemoveImage);
+    const remainingSlots = MAX_PENDING_CHAT_IMAGES - pendingImages.length;
 
     const handleSubmit = useCallback(() => {
       const text = inputValue.trim();
-      const displayText = text || (pendingImage ? "请帮我分析这道题目" : "");
+      const displayText =
+        text || (hasImages ? (pendingImages.length > 1 ? "请帮我分析这些题目" : "请帮我分析这道题目") : "");
       if (!displayText || isSending) return;
 
-      onOptimisticSend?.({ text, previewUrl: pendingImage?.previewUrl });
+      onOptimisticSend?.({ text, previewUrl: pendingImages[0]?.previewUrl });
       setInputValue("");
       onSubmit(text);
-    }, [inputValue, isSending, onOptimisticSend, onSubmit, pendingImage]);
+    }, [hasImages, inputValue, isSending, onOptimisticSend, onSubmit, pendingImages]);
+
+    const previewStrip =
+      hasImages && onRemoveImage ? (
+        <ChatImagePreviewStrip
+          images={pendingImages}
+          onRemove={onRemoveImage}
+          disabled={isSending}
+        />
+      ) : null;
 
     if (isMobile) {
       return (
         <form
-          className="flex shrink-0 flex-col"
+          className="chat-composer-mobile flex shrink-0 flex-col border-t border-border/70 bg-background"
           onSubmit={(e) => {
             e.preventDefault();
             handleSubmit();
           }}
         >
-          {pendingImage && onClearImage ? (
-            <ChatImagePreview
-              image={pendingImage}
-              onClear={onClearImage}
-              disabled={isSending}
-              className="border-b border-border/60 pb-2"
-            />
-          ) : null}
+          {previewStrip}
           <div className="flex h-[52px] items-center gap-1 px-4 py-[10px]">
             {imagePickerEnabled ? (
               <ChatImageAttachButton
-                onImageSelected={onImageSelected!}
+                onImagesSelected={onImagesSelected!}
                 disabled={isSending}
+                remainingSlots={remainingSlots}
                 className="h-9 w-9 shrink-0"
               />
             ) : null}
@@ -130,14 +137,7 @@ export const SageChatComposer = memo(
 
     return (
       <>
-        {pendingImage && onClearImage ? (
-          <ChatImagePreview
-            image={pendingImage}
-            onClear={onClearImage}
-            disabled={isSending}
-            className="px-0"
-          />
-        ) : null}
+        {previewStrip}
         <form
           className="safe-bottom flex shrink-0 items-end gap-2 pb-1 pt-2"
           onSubmit={(e) => {
@@ -147,8 +147,9 @@ export const SageChatComposer = memo(
         >
           {imagePickerEnabled ? (
             <ChatImageAttachButton
-              onImageSelected={onImageSelected!}
+              onImagesSelected={onImagesSelected!}
               disabled={isSending}
+              remainingSlots={remainingSlots}
               className="h-12 w-12 shrink-0"
             />
           ) : null}

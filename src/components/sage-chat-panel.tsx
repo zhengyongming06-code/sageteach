@@ -53,9 +53,9 @@ type SageChatPanelProps = {
   streamingAssistantText?: string | null;
   composerHint?: string | null;
   onWrapUpDetected?: () => void;
-  pendingImage?: PendingChatImage | null;
-  onImageSelected?: (image: PendingChatImage) => void;
-  onClearImage?: () => void;
+  pendingImages?: PendingChatImage[];
+  onImagesSelected?: (images: PendingChatImage[]) => void;
+  onRemoveImage?: (id: string) => void;
   photoAnalysisLoading?: boolean;
   streamingPhotoMarkdown?: string | null;
   photoRemediationByMessageId?: Record<string, KnowledgeRemediation>;
@@ -87,9 +87,9 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
     streamingAssistantText = null,
     composerHint = null,
     onWrapUpDetected,
-    pendingImage = null,
-    onImageSelected,
-    onClearImage,
+    pendingImages = [],
+    onImagesSelected,
+    onRemoveImage,
     photoAnalysisLoading = false,
     streamingPhotoMarkdown = null,
     photoRemediationByMessageId = {},
@@ -361,9 +361,9 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
           isSending={isSending}
           placeholder={placeholder}
           isMobile={isMobile}
-          pendingImage={pendingImage}
-          onImageSelected={onImageSelected}
-          onClearImage={onClearImage}
+          pendingImages={pendingImages}
+          onImagesSelected={onImagesSelected}
+          onRemoveImage={onRemoveImage}
           onOptimisticSend={handleOptimisticSend}
         />
 

@@ -140,25 +140,31 @@ export function stripPhotoContentForChatApi(content: string): string {
 }
 
 export async function analyzeQuestionPhoto(
-  imageDataUrl: string,
+  imageDataUrls: string | string[],
   userHint: string,
   options?: {
     signal?: AbortSignal;
     onDelta?: (accumulated: string) => void;
   },
 ): Promise<string> {
-  const hint = userHint.trim() || "请识别并分析图片中的题目。";
+  const urls = (Array.isArray(imageDataUrls) ? imageDataUrls : [imageDataUrls]).filter(Boolean);
+  if (urls.length === 0) {
+    throw new Error("缺少题目图片");
+  }
+  const hint = userHint.trim() || (urls.length > 1 ? "请识别并分析图片中的题目。" : "请识别并分析图片中的题目。");
+  const multiHint =
+    urls.length > 1 ? `${hint}\n\n（共 ${urls.length} 张图片，请综合所有图片中的题目内容分析。）` : hint;
   const raw = await invokeErnieVlChatStream(
     [
       { role: "system", content: QUESTION_PHOTO_SYSTEM_PROMPT },
       {
         role: "user",
         content: [
-          {
-            type: "image_url",
-            image_url: { url: imageDataUrl },
-          },
-          { type: "text", text: hint },
+          ...urls.map((url) => ({
+            type: "image_url" as const,
+            image_url: { url },
+          })),
+          { type: "text" as const, text: multiHint },
         ],
       },
     ],
