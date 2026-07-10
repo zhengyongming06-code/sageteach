@@ -83,9 +83,32 @@ function getErnieApiKey(): string {
   return apiKey;
 }
 
+export type ErnieVlChatOptions = {
+  max_tokens?: number;
+  temperature?: number;
+  signal?: AbortSignal;
+};
+
+function buildErnieRequestBody(
+  messages: ErnieMessage[],
+  options: ErnieVlChatOptions | undefined,
+  stream: boolean,
+) {
+  const body: Record<string, unknown> = {
+    model: ERNIE_MODEL,
+    messages,
+    max_tokens: options?.max_tokens ?? 4096,
+    stream,
+  };
+  if (options?.temperature != null) {
+    body.temperature = options.temperature;
+  }
+  return body;
+}
+
 export async function invokeErnieVlChat(
   messages: ErnieMessage[],
-  options?: { max_tokens?: number; signal?: AbortSignal },
+  options?: ErnieVlChatOptions,
 ): Promise<string> {
   const apiKey = getErnieApiKey();
 
@@ -95,12 +118,7 @@ export async function invokeErnieVlChat(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: ERNIE_MODEL,
-      messages,
-      max_tokens: options?.max_tokens ?? 4096,
-      stream: false,
-    }),
+    body: JSON.stringify(buildErnieRequestBody(messages, options, false)),
     signal: options?.signal,
   });
 
@@ -128,7 +146,7 @@ export async function invokeErnieVlChat(
 export async function invokeErnieVlChatStream(
   messages: ErnieMessage[],
   onDelta: (textSoFar: string, delta: string) => void,
-  options?: { max_tokens?: number; signal?: AbortSignal },
+  options?: ErnieVlChatOptions,
 ): Promise<string> {
   const apiKey = getErnieApiKey();
 
@@ -140,12 +158,7 @@ export async function invokeErnieVlChatStream(
       Authorization: `Bearer ${apiKey}`,
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({
-      model: ERNIE_MODEL,
-      messages,
-      max_tokens: options?.max_tokens ?? 4096,
-      stream: true,
-    }),
+    body: JSON.stringify(buildErnieRequestBody(messages, options, true)),
   });
 
   if (!res.ok) {

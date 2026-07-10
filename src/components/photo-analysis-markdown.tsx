@@ -4,7 +4,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
-import { PHOTO_ANALYSIS_LOADING } from "@/lib/question-photo-analysis";
+import { PHOTO_ANALYSIS_LOADING, PHOTO_ANALYSIS_METHOD_NOTE } from "@/lib/question-photo-analysis";
 import { splitPhotoAnalysisContent } from "@/lib/photo-quiz-parse";
 import { PhotoQuizCard } from "@/components/photo-quiz-card";
 import "katex/dist/katex.min.css";
@@ -134,7 +134,9 @@ export function PhotoAnalysisMarkdown({ markdown, loading = false, className }: 
     >
       {loading ? (
         <p className="mb-3 text-sm font-medium text-muted-foreground">{PHOTO_ANALYSIS_LOADING}</p>
-      ) : null}
+      ) : (
+        <p className="photo-analysis-method-note">{PHOTO_ANALYSIS_METHOD_NOTE}</p>
+      )}
 
       <div className="space-y-4">
         {segments.map((seg, i) => {

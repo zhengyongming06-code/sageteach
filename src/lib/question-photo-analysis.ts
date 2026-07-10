@@ -1,7 +1,24 @@
 import { invokeErnieVlChatStream } from "@/lib/ernie-vl";
 import { SAGE_MCQ_GENERATION_SAFETY_SUFFIX } from "@/lib/ai-safety";
+import {
+  getCachedPhotoAnalysis,
+  hashPhotoAnalysisInput,
+  setCachedPhotoAnalysis,
+} from "@/lib/photo-analysis-cache";
+import { buildCatalogMethodHint } from "@/lib/photo-analysis-catalog-hint";
+import { generatePhotoAnalysisMarkdown } from "@/lib/photo-analysis-generate";
+import {
+  normalizePhotoMarkdown,
+  sanitizePhotoMarkdownForDisplay,
+  stripHiddenQuizKeysFromMarkdown,
+} from "@/lib/photo-analysis-markdown";
+import { recognizeQuestionPhoto } from "@/lib/photo-analysis-recognition";
 
 export const PHOTO_ANALYSIS_LOADING = "🔍 正在识别题目...";
+
+/** Shown above photo analysis — sets expectations for method-first output. */
+export const PHOTO_ANALYSIS_METHOD_NOTE =
+  "解析侧重解题思路与考点；涉及复杂计算请结合辅学视频自行验算。";
 
 /** Prefix for persisted photo-analysis assistant messages. */
 export const SAGE_PHOTO_MD_MARKER = "__sage_photo_md_v1__";
@@ -30,10 +47,13 @@ export const QUESTION_PHOTO_SYSTEM_PROMPT = `你是高考/大学学习助教。�
    不要巩固题，不要 --- QUIZ --- 块。
 
 3. 【计算/解答题】（数学、物理、化学等需要推导计算的题）
+   定位：辅导入口，不是算题机。优先「题型 + 方法框架 + 关键一步」，不要长数值推导。
    用 markdown 输出：
-   - 解题过程：每个步骤用 ## 步骤1：xxx 单独一行，段与段之间空一行
+   - ## 题型判断（1 句话，如：椭圆与直线联立求弦长）
+   - ## 方法框架（最多 **3** 个步骤，每个用 ## 步骤1：标题 单独一行；每步只写 1～2 句「做什么」，**禁止**具体数字代入与多步连锁等式）
+   - ## 关键一步（最容易错或最决定方向的一步；最多 1 个关键公式，不要展开算到底）
    - ### 核心知识点（- 列表，每条一行）
-   - 行内公式 $...$，独立公式 $$...$$
+   - 行内公式 $...$，独立公式 $$...$$（公式总数不宜过多，优先方法性公式）
    - 最后出 **3 道**选择题，考查解题思路和方法判断，而不是具体数值计算。例如：
      - 「求椭圆弦长时，以下哪个步骤是必须的？」
      - 「以下哪种情况下韦达定理可以使用？」
@@ -54,10 +74,15 @@ D. xxx
 解析：xxx
 --- END QUIZ KEY ---
 
+   【圆锥曲线 / 导数 / 解析几何 / 多步计算题】硬性要求：
+   - **禁止**展开联立、消元、判别式、韦达代入后的完整计算链
+   - **禁止**给出未经充分验算的最终数值答案；题面参数若看不清，写「参数需从题图辨认，数值请自行代入验算」
+   - 方法框架 + 关键一步合计不超过 4 个小节；宁可短而清晰，不要长而可能算错
+
    解题要求：
-   - 每一步计算必须独立成行，不要在一行里堆砌多个等式
-   - 不要心算给出最终数值：中间步骤可写推导式，但若无法从题面确定或验算，写「此步需验证」或「最终数值需你自己代入验算」，禁止编造数字
-   - 只有当你能从题面明确推出唯一结果时，才用【答案：xxx】单独一行标出；否则不要输出【答案】行
+   - 不要心算给出最终数值：若无法从题面唯一确定，写「此步需验证」或「最终数值需你自己代入验算」，**禁止编造数字**
+   - 只有当你能从题面明确推出唯一结果时，才用【答案：xxx】单独一行标出；否则**不要输出【答案】行**
+   - 同一道题多次识别时，题型判断与方法框架应保持一致；不确定处标「待验算」，不要猜测不同数值
 
 4. 【概念/问答题】（历史、政治、生物、语文等文字阐述题）
    用 markdown 输出：
@@ -80,17 +105,7 @@ D. xxx
 - 禁止出现与原题考点无关的题目
 - 每道巩固题出题前先说明：本题考查[具体考点]，与原题相同${SAGE_MCQ_GENERATION_SAFETY_SUFFIX}`;
 
-/** Strip fences and fix common glued heading/paragraph breaks from model output. */
-export function normalizePhotoMarkdown(raw: string): string {
-  let text = raw.trim();
-  text = text.replace(/^```(?:markdown|md|text)?\s*\n?/i, "");
-  text = text.replace(/\n?```\s*$/i, "");
-  // Headings stuck to previous line → start on new paragraph
-  text = text.replace(/([^\n])(#{2,3}\s)/g, "$1\n\n$2");
-  // Blank line after heading when body follows immediately
-  text = text.replace(/(#{2,3}[^\n]+)\n([^\n#\s-])/g, "$1\n\n$2");
-  return text.trim();
-}
+export { normalizePhotoMarkdown, sanitizePhotoMarkdownForDisplay, stripHiddenQuizKeysFromMarkdown };
 
 export function wrapPhotoMarkdown(markdown: string): string {
   return SAGE_PHOTO_MD_MARKER + normalizePhotoMarkdown(markdown);
@@ -115,21 +130,8 @@ export function unwrapPhotoMarkdown(content: string): {
   return { isPhotoAnalysis: false, markdown: content };
 }
 
-const QUIZ_KEY_BLOCK_RE =
-  /---\s*QUIZ\s*KEY\s*---[\s\S]*?---\s*END\s*QUIZ\s*KEY\s*---/gi;
-
 export function hasHiddenQuizKeys(markdown: string): boolean {
   return /---\s*QUIZ\s*KEY\s*---/i.test(markdown);
-}
-
-/** Remove hidden answer blocks before showing or sending photo markdown to chat API. */
-export function stripHiddenQuizKeysFromMarkdown(markdown: string): string {
-  return markdown.replace(QUIZ_KEY_BLOCK_RE, "").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-/** Safe markdown for UI streaming/display — hides quiz keys while tokens arrive. */
-export function sanitizePhotoMarkdownForDisplay(markdown: string): string {
-  return stripHiddenQuizKeysFromMarkdown(markdown);
 }
 
 /** Strip hidden quiz keys from persisted photo assistant content for DeepSeek history. */
@@ -139,21 +141,14 @@ export function stripPhotoContentForChatApi(content: string): string {
   return wrapPhotoMarkdown(stripHiddenQuizKeysFromMarkdown(markdown));
 }
 
-export async function analyzeQuestionPhoto(
-  imageDataUrls: string | string[],
-  userHint: string,
+async function analyzeQuestionPhotoLegacyVl(
+  urls: string[],
+  multiHint: string,
   options?: {
     signal?: AbortSignal;
     onDelta?: (accumulated: string) => void;
   },
 ): Promise<string> {
-  const urls = (Array.isArray(imageDataUrls) ? imageDataUrls : [imageDataUrls]).filter(Boolean);
-  if (urls.length === 0) {
-    throw new Error("缺少题目图片");
-  }
-  const hint = userHint.trim() || (urls.length > 1 ? "请识别并分析图片中的题目。" : "请识别并分析图片中的题目。");
-  const multiHint =
-    urls.length > 1 ? `${hint}\n\n（共 ${urls.length} 张图片，请综合所有图片中的题目内容分析。）` : hint;
   const raw = await invokeErnieVlChatStream(
     [
       { role: "system", content: QUESTION_PHOTO_SYSTEM_PROMPT },
@@ -168,9 +163,54 @@ export async function analyzeQuestionPhoto(
         ],
       },
     ],
-    (textSoFar) => options?.onDelta?.(sanitizePhotoMarkdownForDisplay(normalizePhotoMarkdown(textSoFar))),
-    { max_tokens: 4096, signal: options?.signal },
+    (textSoFar) =>
+      options?.onDelta?.(sanitizePhotoMarkdownForDisplay(normalizePhotoMarkdown(textSoFar))),
+    { max_tokens: 4096, temperature: 0, signal: options?.signal },
   );
-
   return normalizePhotoMarkdown(raw);
+}
+
+export async function analyzeQuestionPhoto(
+  imageDataUrls: string | string[],
+  userHint: string,
+  options?: {
+    signal?: AbortSignal;
+    onDelta?: (accumulated: string) => void;
+  },
+): Promise<string> {
+  const urls = (Array.isArray(imageDataUrls) ? imageDataUrls : [imageDataUrls]).filter(Boolean);
+  if (urls.length === 0) {
+    throw new Error("缺少题目图片");
+  }
+  const hint = userHint.trim() || "请识别并分析图片中的题目。";
+  const multiHint =
+    urls.length > 1 ? `${hint}\n\n（共 ${urls.length} 张图片，请综合所有图片中的题目内容分析。）` : hint;
+
+  const cacheHash = await hashPhotoAnalysisInput(urls, hint);
+  const cached = getCachedPhotoAnalysis(cacheHash);
+  if (cached) {
+    options?.onDelta?.(sanitizePhotoMarkdownForDisplay(cached));
+    return cached;
+  }
+
+  try {
+    const recognition = await recognizeQuestionPhoto(urls, hint, { signal: options?.signal });
+    if (!recognition) {
+      throw new Error("photo recognition parse failed");
+    }
+
+    const catalogHint = buildCatalogMethodHint(recognition);
+    const markdown = await generatePhotoAnalysisMarkdown(recognition, catalogHint, {
+      signal: options?.signal,
+      onDelta: options?.onDelta,
+    });
+
+    setCachedPhotoAnalysis(cacheHash, markdown);
+    return markdown;
+  } catch (pipelineErr) {
+    console.warn("[photo-analysis] pipeline fallback to legacy VL", pipelineErr);
+    const markdown = await analyzeQuestionPhotoLegacyVl(urls, multiHint, options);
+    setCachedPhotoAnalysis(cacheHash, markdown);
+    return markdown;
+  }
 }

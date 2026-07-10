@@ -3508,6 +3508,17 @@
     margin-top: 0.5rem;
   }
 
+  .photo-analysis-method-note {
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.625rem;
+    border-radius: 0.5rem;
+    border: 1px solid color-mix(in srgb, var(--wiki-link) 18%, var(--wiki-border));
+    background: color-mix(in srgb, var(--wiki-link) 6%, var(--wiki-bg));
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--wiki-muted);
+  }
+
   .photo-remediation-head {
     padding: 0.75rem 0.875rem 0;
   }
