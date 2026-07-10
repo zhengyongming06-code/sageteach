@@ -74,21 +74,22 @@ export const SageChatComposer = memo(
 
     if (isMobile) {
       return (
-        <>
+        <form
+          className="flex shrink-0 flex-col"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+        >
           {pendingImage && onClearImage ? (
             <ChatImagePreview
               image={pendingImage}
               onClear={onClearImage}
               disabled={isSending}
+              className="border-b border-border/60 pb-2"
             />
           ) : null}
-          <form
-            className="flex h-[52px] shrink-0 items-center gap-1 px-4 py-[10px]"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSubmit();
-            }}
-          >
+          <div className="flex h-[52px] items-center gap-1 px-4 py-[10px]">
             {imagePickerEnabled ? (
               <ChatImageAttachButton
                 onImageSelected={onImageSelected!}
@@ -122,8 +123,8 @@ export const SageChatComposer = memo(
                 <SendArrowIcon />
               </Button>
             </div>
-          </form>
-        </>
+          </div>
+        </form>
       );
     }
 

@@ -50,7 +50,7 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
         <LearnSubjectMobileBar subject={subjectFilter} showAllTab />
 
         <nav className="wiki-breadcrumb" aria-label="面包屑">
-          <Link to="/app/today">Home</Link>
+          <Link to="/app/today">今日</Link>
           <span className="wiki-breadcrumb-sep">›</span>
           {subjectFilter ? (
             <>
@@ -77,8 +77,13 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
               <p className="text-sm leading-relaxed">
                 {subjectFilter
                   ? `还没有${subjectFilter}识点记录。`
-                  : "还没有识点记录。"}
+                  : "考点来自复盘：在「复盘」里拍错题、跟 Sage 聊解题，识点会自动入库到这里。"}
               </p>
+              {!subjectFilter ? (
+                <p className="mt-2 text-sm leading-relaxed text-[var(--wiki-muted)]">
+                  识点入库后，Sage 回复里会出现辅学块（视频、巩固题）；也可在本页「全部」查看。
+                </p>
+              ) : null}
               <Link
                 to="/app/review"
                 search={subjectFilter ? { subject: subjectFilter } : undefined}

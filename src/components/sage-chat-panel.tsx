@@ -322,12 +322,12 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
         </div>
 
         {showJumpToLatest ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+          <div className="flex justify-center border-t border-border/60 bg-background/80 px-4 py-1.5 backdrop-blur-sm">
             <Button
               type="button"
               size="sm"
               variant="secondary"
-              className="pointer-events-auto h-8 rounded-full border border-border bg-background/95 px-3 text-xs shadow-md backdrop-blur-sm"
+              className="h-8 rounded-full border border-border bg-background px-3 text-xs shadow-sm"
               onClick={() => {
                 stickToBottomRef.current = true;
                 scrollToBottom("smooth");

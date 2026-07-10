@@ -3248,6 +3248,39 @@
     overflow: hidden;
   }
 
+  .photo-remediation-panel:first-child {
+    margin-top: 0;
+  }
+
+  .photo-analysis-collapsible {
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--wiki-border);
+    padding-top: 0.625rem;
+  }
+
+  .photo-analysis-collapsible-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border: 0;
+    background: transparent;
+    padding: 0.375rem 0;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--wiki-nav-fg);
+    cursor: pointer;
+  }
+
+  .photo-analysis-collapsible-toggle:hover {
+    color: var(--wiki-fg);
+  }
+
+  .photo-analysis-collapsible-body {
+    margin-top: 0.5rem;
+  }
+
   .photo-remediation-head {
     padding: 0.75rem 0.875rem 0;
   }

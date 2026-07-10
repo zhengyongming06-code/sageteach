@@ -92,6 +92,7 @@ function AppShell() {
                 <Link
                   key={t.to}
                   to={t.to}
+                  search={t.to === "/app/learn" ? {} : undefined}
                   data-active={active}
                   className="wiki-mobile-tab"
                 >

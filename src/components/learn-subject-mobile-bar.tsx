@@ -17,6 +17,7 @@ export function LearnSubjectMobileBar({
         {showAllTab ? (
           <Link
             to="/app/learn"
+            search={{}}
             className={cn("wiki-learn-subject-tab", !subject && "wiki-learn-subject-tab-active")}
           >
             全部

@@ -159,7 +159,8 @@ function TrainingRow({
                 标记完成
               </button>
               <Link
-                to="/app/review"
+                to="/app/learn"
+                search={{ subject: item.subject, topic: item.knowledge_point }}
                 className="wiki-link-text text-xs"
                 onClick={() => {
                   void recordProductAnalyticsEvent("training_go_click", {
