@@ -2823,6 +2823,16 @@
     font-weight: 500;
     color: var(--wiki-muted);
     text-decoration: none;
+    background: none;
+    border: none;
+    width: 100%;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  button.wiki-mobile-tab[data-active="true"] {
+    color: var(--wiki-heading);
+    font-weight: 600;
   }
 
   .wiki-mobile-tab svg {
@@ -2838,6 +2848,77 @@
 
   .wiki-mobile-tab[data-active="true"] svg {
     opacity: 1;
+  }
+
+  .wiki-mobile-menu {
+    width: min(100%, 20rem);
+    padding-top: 1.25rem;
+    background: var(--wiki-bg);
+    border-color: var(--wiki-border);
+  }
+
+  .wiki-mobile-menu-nav {
+    display: grid;
+    gap: 0.25rem;
+    margin-top: 1.25rem;
+  }
+
+  .wiki-mobile-menu-link {
+    display: block;
+    border-radius: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--wiki-heading);
+    text-decoration: none;
+  }
+
+  .wiki-mobile-menu-link:hover {
+    background: var(--wiki-hover);
+  }
+
+  .wiki-mobile-menu-section {
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--wiki-border);
+  }
+
+  .wiki-mobile-menu-label {
+    margin: 0 0 0.75rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--wiki-muted);
+  }
+
+  .wiki-mobile-menu-theme {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .wiki-mobile-menu-footer {
+    margin-top: auto;
+    padding-top: 1.5rem;
+  }
+
+  .wiki-mobile-menu-signout {
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid var(--wiki-border);
+    padding: 0.625rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--wiki-nav-fg);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .wiki-mobile-menu-signout:hover {
+    background: var(--wiki-hover);
+    color: var(--wiki-heading);
   }
 
   /* Learn page — 3-column: topic tree + article + rail */

@@ -1,31 +1,38 @@
 import { createFileRoute, Outlet, Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { recordAnalyticsActivity } from "@/lib/analytics/api";
 import { useIsAdmin } from "@/hooks/use-is-admin";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { appCanvasClass } from "@/lib/shell-styles";
 import { WikiAppSidebar } from "@/components/wiki-app-sidebar";
+import { WikiMobileMenu } from "@/components/wiki-mobile-menu";
 
 export const Route = createFileRoute("/_authenticated/app")({
   component: AppShell,
 });
 
 const tabs = [
-  { to: "/app/today", label: "今日" },
-  { to: "/app/review", label: "复盘" },
+  { to: "/app/today", label: "今日", match: (path: string) => path.startsWith("/app/today") },
+  { to: "/app/review", label: "复盘", match: (path: string) => path.startsWith("/app/review") },
+  { to: "/app/learn", label: "辅学", match: (path: string) => path.startsWith("/app/learn") },
 ] as const;
 
 function AppShell() {
   const { user, signOut } = useAuth();
   const nav = useNavigate();
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const [menuOpen, setMenuOpen] = useState(false);
   const isReviewChat =
     path.startsWith("/app/review") && !path.includes("/archive");
 
   const { isAdmin } = useIsAdmin();
+
+  const handleSignOut = async () => {
+    await signOut();
+    window.location.href = "/";
+  };
 
   useEffect(() => {
     if (!user?.id) return;
@@ -61,13 +68,7 @@ function AppShell() {
       )}
     >
       <aside className="wiki-sidebar fixed inset-y-0 left-0 z-30 hidden w-64 min-h-0 flex-col overflow-hidden p-5 md:flex">
-        <WikiAppSidebar
-          showAdmin={isAdmin}
-          onSignOut={async () => {
-            await signOut();
-            window.location.href = "/";
-          }}
-        />
+        <WikiAppSidebar showAdmin={isAdmin} onSignOut={handleSignOut} />
       </aside>
 
       <main className={cn("wiki-main md:pl-64", isReviewChat && "flex min-h-0 flex-col overflow-hidden")}>
@@ -84,9 +85,9 @@ function AppShell() {
 
       {!isReviewChat ? (
         <nav className="wiki-mobile-nav safe-bottom fixed inset-x-0 bottom-0 z-40 md:hidden">
-          <div className={cn("mx-auto grid max-w-lg", isAdmin ? "grid-cols-3" : "grid-cols-2")}>
+          <div className="mx-auto grid max-w-lg grid-cols-4">
             {tabs.map((t) => {
-              const active = path.startsWith(t.to);
+              const active = t.match(path);
               return (
                 <Link
                   key={t.to}
@@ -98,25 +99,26 @@ function AppShell() {
                 </Link>
               );
             })}
-            {isAdmin ? (
-              <Link
-                to="/app/admin/analytics"
-                data-active={path.startsWith("/app/admin")}
-                className="wiki-mobile-tab"
-              >
-                分析
-              </Link>
-            ) : null}
+            <button
+              type="button"
+              data-active={menuOpen ? "true" : undefined}
+              className="wiki-mobile-tab"
+              aria-label="我的"
+              onClick={() => setMenuOpen(true)}
+            >
+              我的
+            </button>
           </div>
         </nav>
       ) : null}
 
       {!isReviewChat ? (
-        <div className="pointer-events-none fixed right-4 top-4 z-20 md:hidden">
-          <div className="pointer-events-auto">
-            <ThemeToggle />
-          </div>
-        </div>
+        <WikiMobileMenu
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          showAdmin={isAdmin}
+          onSignOut={handleSignOut}
+        />
       ) : null}
     </div>
   );
