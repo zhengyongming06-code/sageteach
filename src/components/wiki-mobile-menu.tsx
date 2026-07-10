@@ -22,9 +22,9 @@ export function WikiMobileMenu({
 }: WikiMobileMenuProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="wiki-mobile-menu flex flex-col">
-        <SheetHeader className="text-left">
-          <SheetTitle className="text-base font-semibold text-[var(--wiki-heading)]">我的</SheetTitle>
+      <SheetContent side="right" className="wiki-mobile-menu flex flex-col gap-0 p-0">
+        <SheetHeader className="wiki-mobile-menu-header text-left">
+          <SheetTitle className="text-base font-semibold">我的</SheetTitle>
         </SheetHeader>
 
         <nav className="wiki-mobile-menu-nav" aria-label="账户与设置">
@@ -49,7 +49,7 @@ export function WikiMobileMenu({
         <div className="wiki-mobile-menu-section">
           <p className="wiki-mobile-menu-label">外观</p>
           <div className="wiki-mobile-menu-theme">
-            <span className="text-sm text-[var(--wiki-fg)]">深色模式</span>
+            <span className="wiki-mobile-menu-text">深色模式</span>
             <ThemeToggle />
           </div>
         </div>

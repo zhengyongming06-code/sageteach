@@ -80,6 +80,9 @@ function Landing() {
             <a href="#contact">联系</a>
             <Link to="/login">登录</Link>
           </nav>
+          <Link to="/login" className="sy-header-login sm:hidden">
+            登录
+          </Link>
           <ThemeToggle />
           <Link to="/signup" className="sy-button sy-button-primary sy-header-register">
             注册
@@ -106,10 +109,10 @@ function Landing() {
             </p>
             <div className="sy-hero-actions">
               <Link to="/signup" className="sy-button sy-button-primary">
-                免费注册 <ArrowRight className="h-4 w-4" aria-hidden />
+                注册 <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
-              <Link to="/demo" className="sy-button sy-button-secondary">
-                看弦长题示例
+              <Link to="/login" className="sy-button sy-button-secondary">
+                登录
               </Link>
             </div>
           </div>
@@ -202,7 +205,7 @@ function Landing() {
           <div className="sy-access-right">
             <div className="sy-hero-actions">
               <Link to="/signup" className="sy-button sy-button-primary">
-                免费注册 <ArrowRight className="h-4 w-4" aria-hidden />
+                注册 <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
               <Link to="/login" className="sy-button sy-button-secondary">
                 登录
