@@ -59,7 +59,10 @@
     </div>
     <script>
       (function () {
-        function showBootFail(title) {
+        var BOOT_SLOW_MS = 12000;
+        var BOOT_FAIL_MS = 60000;
+
+        function showBootFail(title, hint) {
           var root = document.getElementById("root");
           if (!root || !document.getElementById("boot-splash")) return;
           root.innerHTML =
@@ -67,18 +70,41 @@
             '<p style="font-size:16px;font-weight:600;margin:0 0 8px">' +
             title +
             "</p>" +
-            '<p style="font-size:13px;line-height:1.6;color:#64748b;margin:0">微信内可能无法完整加载。请点右上角 ··· →「在浏览器中打开」，或用 Safari / Chrome 访问 sageteach.top</p>' +
+            '<p style="font-size:13px;line-height:1.6;color:#64748b;margin:0">' +
+            (hint ||
+              "微信内可能无法完整加载。请点右上角 ··· →「在浏览器中打开」，或用 Safari / Chrome 访问 sageteach.top") +
+            "</p>" +
             '<button type="button" onclick="location.reload()" style="margin-top:20px;padding:10px 18px;border:0;border-radius:10px;background:#0f172a;color:#fff;font-size:14px">刷新重试</button></div>';
         }
-        window.addEventListener("error", function () {
-          showBootFail("页面加载失败");
-        });
-        window.addEventListener("unhandledrejection", function () {
-          showBootFail("页面加载失败");
-        });
+
+        function updateSplash(text) {
+          var el = document.getElementById("boot-splash");
+          if (el) el.textContent = text;
+        }
+
+        window.addEventListener(
+          "error",
+          function (event) {
+            var target = event.target;
+            if (target && target.tagName === "SCRIPT") {
+              showBootFail("页面加载失败");
+            }
+          },
+          true,
+        );
+
         setTimeout(function () {
-          if (document.getElementById("boot-splash")) showBootFail("加载超时");
-        }, 15000);
+          updateSplash("网络较慢，仍在加载…");
+        }, BOOT_SLOW_MS);
+
+        setTimeout(function () {
+          if (document.getElementById("boot-splash")) {
+            showBootFail(
+              "加载超时",
+              "首屏资源较大，弱网或微信内可能超过 1 分钟。建议点右上角 ··· →「在浏览器中打开」，或用 Safari / Chrome 访问 sageteach.top",
+            );
+          }
+        }, BOOT_FAIL_MS);
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>

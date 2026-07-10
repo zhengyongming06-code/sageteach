@@ -21,12 +21,21 @@ function wechatBuildCompat(): Plugin {
         out = out.replace(/<script type="module"[^>]+><\/script>\n?/g, "");
 
         if (links.length > 0) {
-          const cleanLink = links[links.length - 1]!.replace(/ crossorigin/g, "");
-          out = out.replace("</head>", `    ${cleanLink}\n  </head>`);
+          const cleanLinks = links.map((l) => l.replace(/ crossorigin/g, ""));
+          out = out.replace("</head>", `${cleanLinks.join("\n    ")}\n  </head>`);
         }
         if (scripts.length > 0) {
-          const cleanScript = scripts[scripts.length - 1]!.replace(/ crossorigin/g, "");
-          out = out.replace("</body>", `    ${cleanScript}\n  </body>`);
+          const cleanScripts = scripts.map((s) => s.replace(/ crossorigin/g, ""));
+          const preload = cleanScripts
+            .map((s) => {
+              const href = s.match(/src="([^"]+)"/)?.[1];
+              return href ? `    <link rel="modulepreload" href="${href}" />\n` : "";
+            })
+            .join("");
+          if (preload) {
+            out = out.replace("</head>", `${preload}  </head>`);
+          }
+          out = out.replace("</body>", `${cleanScripts.join("\n    ")}\n  </body>`);
         }
         return out;
       },
@@ -39,8 +48,8 @@ export default defineConfig({
   /** Expose ERNIE_API_KEY to the client for Review photo analysis (see ernie-vl.ts). */
   envPrefix: ["VITE_", "ERNIE_"],
   plugins: [
-    // Single bundle — WeChat webview often fails on lazy route chunks.
-    TanStackRouterVite({ target: "react", autoCodeSplitting: false }),
+    // Route-level code split ? first paint ~640KB JS (not ~2.2MB); required for mobile CN networks.
+    TanStackRouterVite({ target: "react", autoCodeSplitting: true }),
     react(),
     tailwindcss(),
     tsconfigPaths(),
