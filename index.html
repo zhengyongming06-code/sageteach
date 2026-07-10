@@ -82,16 +82,34 @@
           if (el) el.textContent = text;
         }
 
-        window.addEventListener(
-          "error",
-          function (event) {
-            var target = event.target;
-            if (target && target.tagName === "SCRIPT") {
-              showBootFail("页面加载失败");
-            }
-          },
-          true,
-        );
+        var scriptRetried = false;
+        window.__sageLoadEntry = function (src) {
+          function attach(retry) {
+            var el = document.createElement("script");
+            el.type = "module";
+            el.src = retry
+              ? src + (src.indexOf("?") >= 0 ? "&" : "?") + "cb=" + Date.now()
+              : src;
+            el.addEventListener(
+              "error",
+              function () {
+                if (!scriptRetried) {
+                  scriptRetried = true;
+                  updateSplash("资源加载失败，正在重试…");
+                  attach(true);
+                  return;
+                }
+                showBootFail(
+                  "页面加载失败",
+                  "可能是微信缓存了旧版本，或网络中断。请点右上角 ··· →「在浏览器中打开」，或用 Safari / Chrome 访问 sageteach.top；也可清除微信缓存后重试。",
+                );
+              },
+              { once: true },
+            );
+            document.body.appendChild(el);
+          }
+          attach(false);
+        };
 
         setTimeout(function () {
           updateSplash("网络较慢，仍在加载…");

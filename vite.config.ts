@@ -25,17 +25,18 @@ function wechatBuildCompat(): Plugin {
           out = out.replace("</head>", `${cleanLinks.join("\n    ")}\n  </head>`);
         }
         if (scripts.length > 0) {
-          const cleanScripts = scripts.map((s) => s.replace(/ crossorigin/g, ""));
-          const preload = cleanScripts
-            .map((s) => {
-              const href = s.match(/src="([^"]+)"/)?.[1];
-              return href ? `    <link rel="modulepreload" href="${href}" />\n` : "";
-            })
-            .join("");
-          if (preload) {
-            out = out.replace("</head>", `${preload}  </head>`);
+          const cleanScript = scripts[scripts.length - 1]!.replace(/ crossorigin/g, "");
+          const href = cleanScript.match(/src="([^"]+)"/)?.[1];
+          if (href) {
+            const loader = `    <script>
+      (function () {
+        if (window.__sageLoadEntry) window.__sageLoadEntry(${JSON.stringify(href)});
+      })();
+    </script>`;
+            out = out.replace("</body>", `${loader}\n  </body>`);
+          } else {
+            out = out.replace("</body>", `    ${cleanScript}\n  </body>`);
           }
-          out = out.replace("</body>", `${cleanScripts.join("\n    ")}\n  </body>`);
         }
         return out;
       },
