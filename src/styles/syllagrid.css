@@ -3051,6 +3051,10 @@
     z-index: 10;
   }
 
+  .chat-composer-mobile-row {
+    min-height: 3.5rem;
+  }
+
   .today-practice-list {
     display: grid;
     gap: 0.5rem;

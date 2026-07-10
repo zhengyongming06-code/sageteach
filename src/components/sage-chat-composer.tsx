@@ -14,9 +14,9 @@ export type SageChatComposerHandle = {
   clearInput: () => void;
 };
 
-function SendArrowIcon() {
+function SendArrowIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
       <path
         d="M8 14V2M8 2L3 7M8 2L13 7"
         stroke="currentColor"
@@ -95,13 +95,13 @@ export const SageChatComposer = memo(
           }}
         >
           {previewStrip}
-          <div className="flex h-[52px] items-center gap-1 px-4 py-[10px]">
+          <div className="chat-composer-mobile-row flex items-center gap-2 px-3 py-2">
             {imagePickerEnabled ? (
               <ChatImageAttachButton
                 onImagesSelected={onImagesSelected!}
                 disabled={isSending}
                 remainingSlots={remainingSlots}
-                className="h-9 w-9 shrink-0"
+                className="h-11 w-11 shrink-0 [&_svg]:size-[22px]"
               />
             ) : null}
             <div className="relative flex min-w-0 flex-1 items-center">
@@ -117,17 +117,17 @@ export const SageChatComposer = memo(
                 placeholder={placeholder}
                 rows={1}
                 className={cn(
-                  "min-h-0 h-9 w-full resize-none rounded-[24px] border border-border bg-white py-2 pr-12 text-base leading-5",
-                  imagePickerEnabled ? "pl-3" : "pl-4",
+                  "min-h-0 h-11 w-full resize-none rounded-full border border-border bg-white py-2.5 pr-11 text-base leading-5",
+                  imagePickerEnabled ? "pl-4" : "pl-4",
                 )}
               />
               <Button
                 type="submit"
                 disabled={!canSubmit}
                 size="icon"
-                className="wiki-user-bubble absolute right-1 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full hover:opacity-90"
+                className="absolute right-1.5 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
               >
-                <SendArrowIcon />
+                <SendArrowIcon size={14} />
               </Button>
             </div>
           </div>

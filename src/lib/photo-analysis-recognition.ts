@@ -172,3 +172,21 @@ export async function recognizeQuestionPhoto(
 
   return parsePhotoRecognitionJson(raw);
 }
+
+/** Shown while DeepSeek generates — gives feedback after VL recognition completes. */
+export function buildRecognitionPreviewMarkdown(recognition: PhotoRecognition): string {
+  const subs = recognition.sub_questions;
+  if (subs?.length) {
+    const heads = subs
+      .map((sq) => `## ${sq.label}\n\n${sq.summary}`)
+      .join("\n\n");
+    return `${heads}\n\n*正在整理各问的方法框架…*`;
+  }
+  return [
+    "## 题型判断",
+    "",
+    `${recognition.question_type} — ${recognition.question_summary}`,
+    "",
+    "*正在整理方法框架…*",
+  ].join("\n");
+}

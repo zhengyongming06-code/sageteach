@@ -88,6 +88,11 @@ import {
   persistReviewSummary,
 } from "@/lib/review-summary-db";
 import { logSupabaseError } from "@/lib/supabase-errors";
+import {
+  clearReviewDailySession,
+  getReviewDailySession,
+  setReviewDailySession,
+} from "@/lib/review-daily-session";
 import type { PostgrestError } from "@supabase/supabase-js";
 
 /** Invisible thread anchor: listed in session index, excluded from chat (role system). */
@@ -133,6 +138,17 @@ function resolveDefaultReviewSubject(): Subject {
   const stored = lastReviewSubjectStore.getItem(LAST_REVIEW_SUBJECT_KEY);
   if (isSubjectSearch(stored ?? undefined)) return stored;
   return SUBJECTS[0];
+}
+
+function resolveInitialSessionSlug(subject: string, cachedSlug: string | null, cachedDate: string): string | null {
+  const today = localYmd();
+  if (cachedSlug && cachedDate === today) return cachedSlug;
+  return getReviewDailySession(subject, today, lastReviewSubjectStore);
+}
+
+function persistDailySession(subject: string, slug: string | null) {
+  if (!slug) return;
+  setReviewDailySession(subject, localYmd(), slug, lastReviewSubjectStore);
 }
 
 function localYmd(d = new Date()) {
@@ -349,6 +365,7 @@ function Review() {
 
   const applyActiveSessionSlug = useCallback((slug: string | null) => {
     setActiveSessionSlugState(slug);
+    if (slug) persistDailySession(subjectRef.current, slug);
   }, []);
 
   const beginReviewScope = useCallback((newSubject: string, slug: string | null) => {
@@ -602,6 +619,7 @@ function Review() {
 
   const clearCurrentSubjectChat = useCallback(() => {
     if (onboardingIncomplete) return;
+    clearReviewDailySession(subject, lastReviewSubjectStore);
     chatsBySubject.current[subject] = emptySubjectChatCache();
     resetChatUiForScopeChange();
     handleSubjectChange(subject, null, localYmd());
@@ -670,12 +688,35 @@ function Review() {
       return;
     }
     resetChatUiForScopeChange();
-    handleSubjectChange(subject, null, localYmd());
+    const today = localYmd();
+    const slug = getReviewDailySession(subject, today, lastReviewSubjectStore);
+    handleSubjectChange(subject, slug, today);
   }, [
     subject,
     onboardingIncomplete,
     handleSubjectChange,
     resetChatUiForScopeChange,
+  ]);
+
+  /** Restore today's session when re-entering review (e.g. after switching tabs). */
+  const reviewSessionBootstrappedRef = useRef(false);
+  useEffect(() => {
+    if (!profileFlagsReady || onboardingIncomplete || reviewSessionBootstrappedRef.current) return;
+    reviewSessionBootstrappedRef.current = true;
+    const sub = urlSubject ?? subject;
+    const today = localYmd();
+    const slug = getReviewDailySession(sub, today, lastReviewSubjectStore);
+    if (!slug || activeSessionSlug) return;
+    suppressChatMessagesSyncRef.current = false;
+    skipSubjectScopeEffectRef.current = true;
+    handleSubjectChange(sub, slug, today);
+  }, [
+    profileFlagsReady,
+    onboardingIncomplete,
+    urlSubject,
+    subject,
+    activeSessionSlug,
+    handleSubjectChange,
   ]);
 
   /** Clear summary only when leaving the pinned session scope (not when submit finishes). */
@@ -898,8 +939,12 @@ function Review() {
       }
 
       const cached = chatsBySubject.current[nextSubject] ?? emptySubjectChatCache();
-      const slug = cached.activeSessionSlug;
-      const date = cached.selectedDate;
+      const slug = resolveInitialSessionSlug(
+        nextSubject,
+        cached.activeSessionSlug,
+        cached.selectedDate,
+      );
+      const date = localYmd();
 
       skipSubjectScopeEffectRef.current = true;
       resetChatUiForScopeChange();
@@ -913,7 +958,7 @@ function Review() {
       setSubjectChatLoading(false);
       setHistoryFetching(false);
 
-      if (slug && cached.messages.length === 0 && !suppressChatMessagesSyncRef.current) {
+      if (slug && !suppressChatMessagesSyncRef.current) {
         void loadHistory(nextSubject, slug);
       }
       if (slug) void loadExistingSummary(nextSubject, slug, date);
@@ -1420,9 +1465,11 @@ function Review() {
         }
 
         await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
+        if (!scopeStale()) {
+          await loadHistory(scopeSubject, sessionSlug);
+        }
         setStreamingPhotoMarkdown(null);
         setPhotoAnalysisLoading(false);
-        if (!scopeStale()) void loadHistory(scopeSubject, sessionSlug);
         return;
       }
 
@@ -1596,6 +1643,7 @@ function Review() {
 
     setMessages([]);
     suppressChatMessagesSyncRef.current = true;
+    clearReviewDailySession(chatSubject, lastReviewSubjectStore);
     setSubjectsWithEndedReview((prev) => new Set(prev).add(chatSubject));
 
     if (summaryDoneKeysRef.current.has(activeSessionSlug)) {
@@ -1662,6 +1710,7 @@ function Review() {
       if (iErr) console.warn("[startTodaySession] insert", iErr);
 
       slugNavSourceRef.current = "control";
+      clearReviewDailySession(subj, lastReviewSubjectStore);
       await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
       handleSubjectChange(subj, newSlug, today);
     } catch (e) {

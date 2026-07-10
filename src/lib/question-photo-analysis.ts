@@ -13,7 +13,7 @@ import {
   stripHiddenQuizKeysFromMarkdown,
   stripQuizBlocksFromMarkdown,
 } from "@/lib/photo-analysis-markdown";
-import { recognizeQuestionPhoto } from "@/lib/photo-analysis-recognition";
+import { recognizeQuestionPhoto, buildRecognitionPreviewMarkdown } from "@/lib/photo-analysis-recognition";
 
 export const PHOTO_ANALYSIS_LOADING = "🔍 正在识别题目...";
 
@@ -175,6 +175,10 @@ export async function analyzeQuestionPhoto(
     if (!recognition) {
       throw new Error("photo recognition parse failed");
     }
+
+    options?.onDelta?.(
+      sanitizePhotoMarkdownForDisplay(buildRecognitionPreviewMarkdown(recognition)),
+    );
 
     const catalogHint = buildCatalogMethodHint(recognition);
     const markdown = await generatePhotoAnalysisMarkdown(recognition, catalogHint, {

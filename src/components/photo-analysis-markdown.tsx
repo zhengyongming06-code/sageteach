@@ -151,7 +151,7 @@ export function PhotoAnalysisMarkdown({ markdown, loading = false, className }: 
         })}
       </div>
 
-      {loading ? <PhotoAnalysisSkeleton /> : null}
+      {loading && !markdown.trim() ? <PhotoAnalysisSkeleton /> : null}
     </div>
   );
 }
