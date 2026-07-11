@@ -3,6 +3,13 @@ import type { PhotoKnowledgeExtraction } from "@/lib/knowledge-tracking/types";
 import { fetchStudentKnowledgeMastery } from "@/lib/knowledge-tracking/api";
 import type { KnowledgePointStatus } from "@/lib/knowledge-points";
 import type { Subject } from "@/lib/subjects";
+import {
+  deriveLearnConsolidationPhase,
+  fetchLearnHubProgressMap,
+  topicProgressKey,
+  type LearnConsolidationPhase,
+  type RemediationProgress,
+} from "@/lib/knowledge-tracking/remediation-progress";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = supabase as any;
@@ -17,6 +24,11 @@ export type LearnHubTopic = {
   last_event_at: string | null;
 };
 
+export type LearnHubTopicEnriched = LearnHubTopic & {
+  consolidation_phase: LearnConsolidationPhase;
+  progress: RemediationProgress;
+};
+
 export type LearnTopicPhotoContext = {
   question_summary: string;
   question_type: string;
@@ -29,6 +41,8 @@ export const learnHubQueryKeys = {
     ["learn-hub-topics", userId, subject ?? "all"] as const,
   photoContext: (userId: string, subject: Subject, topic: string) =>
     ["learn-topic-photo", userId, subject, topic] as const,
+  topicProgress: (userId: string, subject: Subject, topic: string) =>
+    ["learn-topic-progress", userId, subject, topic] as const,
 };
 
 function isLearnHubCandidate(row: {
@@ -65,6 +79,33 @@ export async function fetchLearnHubTopics(
       if (ta !== tb) return tb.localeCompare(ta);
       return (a.mastery_score ?? 50) - (b.mastery_score ?? 50);
     });
+}
+
+export async function fetchLearnHubTopicsEnriched(
+  userId: string,
+  subject?: Subject,
+): Promise<LearnHubTopicEnriched[]> {
+  const topics = await fetchLearnHubTopics(userId, subject);
+  const progressMap = await fetchLearnHubProgressMap(
+    userId,
+    topics.map((t) => ({ subject: t.subject, name: t.name })),
+  );
+  return topics.map((t) => {
+    const progress =
+      progressMap[topicProgressKey(t.subject, t.name)] ?? {
+        video_watched: false,
+        practice_done: false,
+      };
+    return {
+      ...t,
+      progress,
+      consolidation_phase: deriveLearnConsolidationPhase({
+        progress,
+        status: t.status,
+        mastery_score: t.mastery_score,
+      }),
+    };
+  });
 }
 
 export async function userHasLearnTopic(

@@ -2782,6 +2782,85 @@
     color: var(--wiki-fg);
   }
 
+  .learn-phase-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border: 1px solid transparent;
+  }
+
+  .learn-phase-badge-pending {
+    background: color-mix(in srgb, #f59e0b 14%, var(--wiki-bg));
+    color: #b45309;
+    border-color: color-mix(in srgb, #f59e0b 35%, var(--wiki-border));
+  }
+
+  .dark .learn-phase-badge-pending {
+    color: #fcd34d;
+    background: color-mix(in srgb, #f59e0b 18%, var(--wiki-bg));
+  }
+
+  .learn-phase-badge-progress {
+    background: color-mix(in srgb, #3b82f6 12%, var(--wiki-bg));
+    color: #1d4ed8;
+    border-color: color-mix(in srgb, #3b82f6 30%, var(--wiki-border));
+  }
+
+  .dark .learn-phase-badge-progress {
+    color: #93c5fd;
+    background: color-mix(in srgb, #3b82f6 16%, var(--wiki-bg));
+  }
+
+  .learn-phase-badge-done {
+    background: color-mix(in srgb, #10b981 12%, var(--wiki-bg));
+    color: #047857;
+    border-color: color-mix(in srgb, #10b981 30%, var(--wiki-border));
+  }
+
+  .dark .learn-phase-badge-done {
+    color: #6ee7b7;
+    background: color-mix(in srgb, #10b981 16%, var(--wiki-bg));
+  }
+
+  .learn-consolidation-banner {
+    border-radius: 0.75rem;
+    border: 1px solid var(--wiki-border);
+    background: color-mix(in srgb, var(--wiki-bg) 92%, var(--wiki-hover));
+    padding: 0.875rem 1rem;
+  }
+
+  .learn-consolidation-banner-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .learn-consolidation-banner-hint {
+    margin: 0;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--wiki-nav-fg);
+  }
+
+  .learn-consolidation-banner .remediation-progress-actions {
+    margin-top: 0.75rem;
+  }
+
+  .learn-consolidation-banner-done {
+    margin: 0.75rem 0 0;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #047857;
+  }
+
+  .dark .learn-consolidation-banner-done {
+    color: #6ee7b7;
+  }
+
   .wiki-section-title {
     margin: 0.25rem 0 1rem;
     font-size: 1.125rem;

@@ -18,8 +18,14 @@ const TOAST: Record<
   RemediationAction,
   { mark: string; unmark: string }
 > = {
-  video_watched: { mark: "已记录看完视频，掌握度 +5", unmark: "已取消，掌握度 -5" },
-  practice_done: { mark: "已记录练完，掌握度 +10", unmark: "已取消，掌握度 -10" },
+  video_watched: {
+    mark: "已记录看完视频，进入「掌握中」",
+    unmark: "已取消视频标记",
+  },
+  practice_done: {
+    mark: "考点已掌握 ✓",
+    unmark: "已取消练完标记",
+  },
 };
 
 export function RemediationProgressActions({

@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, PlayCircle } from "lucide-react";
 import { LearnHubPanel } from "@/components/learn-hub-panel";
-import { RemediationProgressActions } from "@/components/remediation-progress-actions";
+import { LearnConsolidationBanner } from "@/components/learn-consolidation-banner";
 import { KnowledgeTopicRail } from "@/components/knowledge-topic-rail";
 import { LearnSubjectMobileBar } from "@/components/learn-subject-mobile-bar";
 import { KnowledgeTopicTree } from "@/components/knowledge-topic-tree";
@@ -18,13 +18,14 @@ import type { KnowledgeTopicEntry } from "@/lib/knowledge-topics/topic-types";
 import { buildKnowledgeRemediation } from "@/lib/knowledge-topics/recommend";
 import {
   fetchLatestPhotoContextForTopic,
-  fetchLearnHubTopics,
+  fetchLearnHubTopicsEnriched,
   learnHubQueryKeys,
 } from "@/lib/knowledge-tracking/learn-hub";
 import {
+  fetchLearnTopicProgressMerged,
   readLearnTopicProgress,
   recordLearnTopicProgress,
-  type RemediationProgress,
+  type RemediationAction,
 } from "@/lib/knowledge-tracking/remediation-progress";
 import { type Subject } from "@/lib/subjects";
 import { cn } from "@/lib/utils";
@@ -111,6 +112,7 @@ function LearnTopicPage({
   topic: string;
   userId: string;
 }) {
+  const qc = useQueryClient();
   const catalogEntry = useMemo(
     () => getKnowledgeTopicEntry(subject, topic) ?? resolveLearnTopic(subject, topic),
     [subject, topic],
@@ -118,11 +120,20 @@ function LearnTopicPage({
 
   const { data: hubTopics = [], isLoading: accessLoading } = useQuery({
     queryKey: learnHubQueryKeys.topics(userId, subject),
-    queryFn: () => fetchLearnHubTopics(userId, subject),
+    queryFn: () => fetchLearnHubTopicsEnriched(userId, subject),
     staleTime: 30_000,
   });
 
-  const hasAccess = hubTopics.some((t) => t.name === topic);
+  const hubTopic = hubTopics.find((t) => t.name === topic);
+  const hasAccess = Boolean(hubTopic);
+
+  const { data: learnProgress = { video_watched: false, practice_done: false } } = useQuery({
+    queryKey: learnHubQueryKeys.topicProgress(userId, subject, topic),
+    queryFn: () => fetchLearnTopicProgressMerged(userId, subject, topic),
+    enabled: hasAccess,
+    staleTime: 15_000,
+    initialData: () => readLearnTopicProgress(subject, topic),
+  });
 
   const { data: photoContext } = useQuery({
     queryKey: learnHubQueryKeys.photoContext(userId, subject, topic),
@@ -148,18 +159,27 @@ function LearnTopicPage({
   );
 
   const [activeSection, setActiveSection] = useState("summary");
-  const [learnProgress, setLearnProgress] = useState<RemediationProgress>({
-    video_watched: false,
-    practice_done: false,
-  });
 
   useEffect(() => {
     setActiveSection("summary");
   }, [topic]);
 
-  useEffect(() => {
-    setLearnProgress(readLearnTopicProgress(subject, topic));
-  }, [subject, topic]);
+  const markLearnProgress = useCallback(
+    async (action: RemediationAction) => {
+      const next = await recordLearnTopicProgress({
+        subject,
+        topic,
+        knowledgePoint: topic,
+        action,
+        current: learnProgress,
+      });
+      void qc.invalidateQueries({ queryKey: learnHubQueryKeys.topicProgress(userId, subject, topic) });
+      void qc.invalidateQueries({ queryKey: learnHubQueryKeys.topics(userId, subject) });
+      void qc.invalidateQueries({ queryKey: learnHubQueryKeys.topics(userId) });
+      return next;
+    },
+    [subject, topic, learnProgress, qc, userId],
+  );
 
   const scrollToSection = useCallback((id: string) => {
     setActiveSection(id);
@@ -252,6 +272,17 @@ function LearnTopicPage({
           <p className="mt-4 text-base leading-relaxed text-[var(--wiki-fg)]">{entry.summary}</p>
         </header>
 
+        {hubTopic ? (
+          <LearnConsolidationBanner
+            phase={hubTopic.consolidation_phase}
+            progress={learnProgress}
+            status={hubTopic.status}
+            masteryScore={hubTopic.mastery_score}
+            onMark={markLearnProgress}
+            className="wiki-prose-section scroll-mt-24"
+          />
+        ) : null}
+
         {entry.sections.map((section) => (
           <section
             key={section.id}
@@ -312,22 +343,6 @@ function LearnTopicPage({
                 </li>
               ))}
             </ol>
-            <div className="wiki-learn-progress-foot">
-              <RemediationProgressActions
-                progress={learnProgress}
-                onMark={async (action) => {
-                  const next = await recordLearnTopicProgress({
-                    subject: entry.subject,
-                    topic: entry.name,
-                    knowledgePoint: entry.name,
-                    action,
-                    current: learnProgress,
-                  });
-                  setLearnProgress(next);
-                  return next;
-                }}
-              />
-            </div>
           </section>
         ) : null}
 

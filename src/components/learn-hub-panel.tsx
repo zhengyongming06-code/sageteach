@@ -5,10 +5,12 @@ import { ChevronRight } from "lucide-react";
 import { LearnSubjectMobileBar } from "@/components/learn-subject-mobile-bar";
 import { KnowledgeTopicTree } from "@/components/knowledge-topic-tree";
 import {
-  fetchLearnHubTopics,
+  fetchLearnHubTopicsEnriched,
   learnHubQueryKeys,
 } from "@/lib/knowledge-tracking/learn-hub";
 import { SAGE_KNOWLEDGE_REFRESH_EVENT } from "@/lib/knowledge-tracking/ingest-client";
+import { consolidationNextStep } from "@/lib/knowledge-tracking/remediation-progress";
+import { LearnConsolidationBadge } from "@/components/learn-consolidation-badge";
 import { subjectAccentTaskClass } from "@/lib/subject-accent";
 import type { Subject } from "@/lib/subjects";
 import { cn } from "@/lib/utils";
@@ -38,7 +40,7 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
 
   const { data: topics = [], isLoading } = useQuery({
     queryKey: learnHubQueryKeys.topics(userId, subjectFilter),
-    queryFn: () => fetchLearnHubTopics(userId, subjectFilter),
+    queryFn: () => fetchLearnHubTopicsEnriched(userId, subjectFilter),
     staleTime: 30_000,
   });
 
@@ -81,7 +83,7 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
               </p>
               {!subjectFilter ? (
                 <p className="mt-2 text-sm leading-relaxed text-[var(--wiki-muted)]">
-                  识点入库后，Sage 回复里会出现辅学块（视频、巩固题）；也可在本页「全部」查看。
+                  入库后为「待巩固」；看完视频或练完题可标记进度，练完即「已掌握」。
                 </p>
               ) : null}
               <Link
@@ -98,6 +100,7 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
             <ul className="wiki-prose-list">
               {topics.map((t) => {
                 const dateLabel = formatHubDate(t.last_wrong_at ?? t.last_event_at);
+                const nextStep = consolidationNextStep(t.consolidation_phase);
                 return (
                   <li key={`${t.subject}-${t.name}`} className={cn(subjectAccentTaskClass(t.subject))}>
                     <Link
@@ -108,6 +111,7 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="wiki-tag">{t.subject}</span>
+                          <LearnConsolidationBadge phase={t.consolidation_phase} />
                           {dateLabel ? (
                             <time className="wiki-prose-sub text-xs tabular-nums">{dateLabel}</time>
                           ) : null}
@@ -116,9 +120,8 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
                           {t.name}
                         </p>
                         <p className="mt-1 text-xs text-[var(--wiki-nav-fg)]">
-                          {t.status}
+                          {nextStep ?? "巩固已完成"}
                           {t.mastery_score != null ? ` · 掌握度 ${Math.round(t.mastery_score)}` : ""}
-                          {t.wrong_count > 0 ? ` · 错 ${t.wrong_count} 次` : ""}
                         </p>
                       </div>
                       <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-[var(--wiki-muted)]" aria-hidden />
