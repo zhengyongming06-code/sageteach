@@ -355,6 +355,10 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
           </p>
         ) : null}
 
+        {belowForm && isMobile ? (
+          <div className={cn("mt-2 shrink-0 px-4")}>{belowForm}</div>
+        ) : null}
+
         <SageChatComposer
           ref={composerRef}
           onSubmit={onSubmit}
@@ -367,9 +371,11 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
           onOptimisticSend={handleOptimisticSend}
         />
 
-        {belowForm ? (
-          <div className={cn("mt-2 shrink-0", isMobile && "px-4 pb-3")}>{belowForm}</div>
+        {belowForm && !isMobile ? (
+          <div className="mt-2 shrink-0">{belowForm}</div>
         ) : null}
+
+        {isMobile ? <div className="safe-bottom shrink-0 pb-1" aria-hidden /> : null}
       </div>
     </div>
   );

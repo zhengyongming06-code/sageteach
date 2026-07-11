@@ -3842,6 +3842,25 @@
     color: color-mix(in srgb, #15803d 85%, var(--wiki-heading));
   }
 
+  .review-summary-collapse-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--wiki-muted);
+    cursor: pointer;
+  }
+
+  .review-summary-collapse-btn:hover {
+    background: color-mix(in srgb, var(--wiki-hover) 80%, transparent);
+    color: var(--wiki-fg);
+  }
+
   .remediation-progress-btn-done:hover:not(:disabled) {
     border-color: color-mix(in srgb, #dc2626 35%, var(--wiki-border));
     background: color-mix(in srgb, #dc2626 6%, transparent);

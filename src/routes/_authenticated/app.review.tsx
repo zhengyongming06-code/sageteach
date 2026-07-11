@@ -1778,9 +1778,11 @@ function Review() {
     !subjectsWithEndedReview.has(chatSubject) &&
     !isSummarySubmitting;
 
-  const summaryBelow =
+  const summaryCardProps = { collapsible: true, defaultCollapsed: true };
+
+  const buildSummaryBelow = (mobile: boolean) =>
     sessionCard?.kind === "loading" ? (
-      <ReviewSummaryCard variant="skeleton" />
+      <ReviewSummaryCard variant="skeleton" {...(mobile ? summaryCardProps : {})} />
     ) : sessionCard?.kind === "error" ? (
       <div className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
         <p className="text-destructive">{sessionCard.message}</p>
@@ -1802,6 +1804,7 @@ function Review() {
         tonightTask={sessionCard.tonight_task}
         followUp={sessionCard.follow_up}
         mastered={sessionCard.mastered}
+        {...(mobile ? summaryCardProps : {})}
       />
     ) : sessionCard?.kind === "full" ? (
       <ReviewSummaryCard
@@ -1810,6 +1813,7 @@ function Review() {
         tonightTask={sessionCard.tonight_task}
         followUp={sessionCard.follow_up}
         mastered={sessionCard.mastered}
+        {...(mobile ? summaryCardProps : {})}
       />
     ) : null;
 
@@ -1880,7 +1884,7 @@ function Review() {
           </Button>
         ) : null
       }
-      belowForm={summaryBelow}
+      belowForm={buildSummaryBelow(layout === "mobile")}
     />
   );
 
