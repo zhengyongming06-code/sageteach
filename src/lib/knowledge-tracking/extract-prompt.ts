@@ -16,7 +16,7 @@ Schema:
 
 规则：
 - knowledge_points 必须具体，优先使用标准高考知识点名称
-- is_wrong 仅在文本明确表示「我做错了/这题错了/求讲解错题」等时为 true；普通搜题、对答案、未说明对错时默认 false
+- is_wrong 仅在文本明确表示「我做错了/这题错了/求讲解错题」等时为 true；复盘页上传题目图片时，默认为错题讲解（is_wrong: true），除非文本明确说做对了或只是对答案
 - 禁止根据【答案】行或解析存在就推断学生做错
 - 至少 1 个、最多 5 个 knowledge_points
 - confidence 反映你对知识点标注的把握；不确定时降低 confidence

@@ -3,6 +3,10 @@ import { invokeDeepSeekChat } from "@/lib/deepseek-supabase";
 import { generateDailyTrainingItems } from "@/lib/knowledge-tracking/daily-training";
 import { persistPhotoKnowledgeToTonightTask } from "@/lib/photo-weak-archive";
 import {
+  getKnowledgePointsForSubject,
+  isSubject,
+} from "@/lib/knowledge-points";
+import {
   buildPhotoKnowledgeExtractionUserPrompt,
   parsePhotoExtractionJson,
   PHOTO_KNOWLEDGE_EXTRACTION_SYSTEM,
@@ -17,7 +21,6 @@ import type {
   KnowledgeTrackPhotoResponse,
   PhotoKnowledgeExtraction,
 } from "@/lib/knowledge-tracking/types";
-import { persistPhotoKnowledgeToTonightTask } from "@/lib/photo-weak-archive";
 import type { Subject } from "@/lib/subjects";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -321,6 +324,18 @@ export async function ingestPhotoEvidenceClient(
         delta_score: MASTERY_EVENT_DELTA.photo_wrong,
         source_type: "photo",
         source_id: payload.coach_message_id,
+      });
+    }
+  } else {
+    for (const kp of extraction.knowledge_points) {
+      masteryEvents.push({
+        subject: payload.subject,
+        knowledge_point: kp,
+        event_type: "manual_adjust",
+        delta_score: 0,
+        source_type: "photo",
+        source_id: payload.coach_message_id,
+        metadata: { reason: "photo_analyzed" },
       });
     }
   }

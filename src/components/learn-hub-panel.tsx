@@ -77,7 +77,7 @@ export function LearnHubPanel({ userId, subjectFilter }: LearnHubPanelProps) {
               <p className="text-sm leading-relaxed">
                 {subjectFilter
                   ? `还没有${subjectFilter}识点记录。`
-                  : "考点来自复盘：在「复盘」里拍错题、跟 Sage 聊解题，识点会自动入库到这里。"}
+                  : "考点来自复盘：在「复盘」里拍错题，解析完成后会自动识点入库（无需额外操作）。"}
               </p>
               {!subjectFilter ? (
                 <p className="mt-2 text-sm leading-relaxed text-[var(--wiki-muted)]">

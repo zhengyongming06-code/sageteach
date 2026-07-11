@@ -90,9 +90,9 @@ import {
 import { logSupabaseError } from "@/lib/supabase-errors";
 import {
   clearReviewDailySession,
-  getReviewDailySession,
   setReviewDailySession,
 } from "@/lib/review-daily-session";
+import { resolveReviewSessionSlug } from "@/lib/review-session-resolve";
 import type { PostgrestError } from "@supabase/supabase-js";
 
 /** Invisible thread anchor: listed in session index, excluded from chat (role system). */
@@ -136,14 +136,17 @@ const LAST_REVIEW_SUBJECT_KEY = "sage:last-review-subject";
 
 function resolveDefaultReviewSubject(): Subject {
   const stored = lastReviewSubjectStore.getItem(LAST_REVIEW_SUBJECT_KEY);
-  if (isSubjectSearch(stored ?? undefined)) return stored;
+  if (stored && isSubjectSearch(stored)) return stored;
   return SUBJECTS[0];
 }
 
-function resolveInitialSessionSlug(subject: string, cachedSlug: string | null, cachedDate: string): string | null {
+function cachedSessionSlugForToday(
+  cachedSlug: string | null,
+  cachedDate: string,
+): string | null {
   const today = localYmd();
   if (cachedSlug && cachedDate === today) return cachedSlug;
-  return getReviewDailySession(subject, today, lastReviewSubjectStore);
+  return null;
 }
 
 function persistDailySession(subject: string, slug: string | null) {
@@ -689,11 +692,15 @@ function Review() {
     }
     resetChatUiForScopeChange();
     const today = localYmd();
-    const slug = getReviewDailySession(subject, today, lastReviewSubjectStore);
-    handleSubjectChange(subject, slug, today);
+    void resolveReviewSessionSlug(user?.id, subject, today, null, lastReviewSubjectStore).then(
+      (slug) => {
+        handleSubjectChange(subject, slug, today);
+      },
+    );
   }, [
     subject,
     onboardingIncomplete,
+    user?.id,
     handleSubjectChange,
     resetChatUiForScopeChange,
   ]);
@@ -701,23 +708,21 @@ function Review() {
   /** Restore today's session when re-entering review (e.g. after switching tabs). */
   const reviewSessionBootstrappedRef = useRef(false);
   useEffect(() => {
-    if (!profileFlagsReady || onboardingIncomplete || reviewSessionBootstrappedRef.current) return;
+    if (!profileFlagsReady || onboardingIncomplete || !user?.id || !urlSubject) return;
+    if (reviewSessionBootstrappedRef.current) return;
     reviewSessionBootstrappedRef.current = true;
-    const sub = urlSubject ?? subject;
+
+    const sub = urlSubject;
     const today = localYmd();
-    const slug = getReviewDailySession(sub, today, lastReviewSubjectStore);
-    if (!slug || activeSessionSlug) return;
-    suppressChatMessagesSyncRef.current = false;
-    skipSubjectScopeEffectRef.current = true;
-    handleSubjectChange(sub, slug, today);
-  }, [
-    profileFlagsReady,
-    onboardingIncomplete,
-    urlSubject,
-    subject,
-    activeSessionSlug,
-    handleSubjectChange,
-  ]);
+    void resolveReviewSessionSlug(user.id, sub, today, null, lastReviewSubjectStore).then(
+      (slug) => {
+        if (!slug) return;
+        suppressChatMessagesSyncRef.current = false;
+        skipSubjectScopeEffectRef.current = true;
+        handleSubjectChange(sub, slug, today);
+      },
+    );
+  }, [profileFlagsReady, onboardingIncomplete, urlSubject, user?.id, handleSubjectChange]);
 
   /** Clear summary only when leaving the pinned session scope (not when submit finishes). */
   useEffect(() => {
@@ -939,29 +944,37 @@ function Review() {
       }
 
       const cached = chatsBySubject.current[nextSubject] ?? emptySubjectChatCache();
-      const slug = resolveInitialSessionSlug(
-        nextSubject,
+      const date = localYmd();
+      const cachedSlug = cachedSessionSlugForToday(
         cached.activeSessionSlug,
         cached.selectedDate,
       );
-      const date = localYmd();
 
       skipSubjectScopeEffectRef.current = true;
       resetChatUiForScopeChange();
-      beginReviewScope(nextSubject, slug);
-      setMessages(cached.messages);
-      setMessageRows(cached.messageRows);
-      setSessionCard(cached.sessionCard);
-      setSubject(nextSubject);
-      setSelectedDate(date);
-      applyActiveSessionSlug(slug);
-      setSubjectChatLoading(false);
-      setHistoryFetching(false);
 
-      if (slug && !suppressChatMessagesSyncRef.current) {
-        void loadHistory(nextSubject, slug);
-      }
-      if (slug) void loadExistingSummary(nextSubject, slug, date);
+      void resolveReviewSessionSlug(
+        user?.id,
+        nextSubject,
+        date,
+        cachedSlug ? { slug: cachedSlug } : null,
+        lastReviewSubjectStore,
+      ).then((slug) => {
+        beginReviewScope(nextSubject, slug);
+        setMessages(cached.messages);
+        setMessageRows(cached.messageRows);
+        setSessionCard(cached.sessionCard);
+        setSubject(nextSubject);
+        setSelectedDate(date);
+        applyActiveSessionSlug(slug);
+        setSubjectChatLoading(Boolean(slug));
+        setHistoryFetching(false);
+
+        if (slug && !suppressChatMessagesSyncRef.current) {
+          void loadHistory(nextSubject, slug);
+        }
+        if (slug) void loadExistingSummary(nextSubject, slug, date);
+      });
     },
     [
       subject,
@@ -978,6 +991,7 @@ function Review() {
       applyActiveSessionSlug,
       loadHistory,
       loadExistingSummary,
+      user?.id,
     ],
   );
 
@@ -1457,7 +1471,7 @@ function Review() {
             }
             const n = res.extraction.knowledge_points.length;
             if (n > 0) {
-              toast.success(`已识点 ${n} 个，辅学块已更新；今晚任务已写入今日页`);
+              toast.success(`已识点 ${n} 个，已同步到辅学；今晚任务已写入今日页`);
             }
           }).catch((e) => {
             console.warn("[knowledge-ingest]", e);

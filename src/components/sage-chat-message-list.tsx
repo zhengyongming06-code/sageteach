@@ -51,7 +51,7 @@ function AssistantBubbleContent({
   streaming?: boolean;
 }) {
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-[var(--wiki-fg)] prose-p:leading-relaxed">
+    <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-headings:my-2 prose-p:text-foreground prose-headings:text-foreground prose-p:leading-relaxed">
       {content !== "" ? (
         <ReactMarkdown urlTransform={markdownUrlTransform} components={markdownComponents}>
           {content}
@@ -188,7 +188,7 @@ export const SageChatMessageList = memo(function SageChatMessageList({
       : undefined;
     const showRemediationFirst = Boolean(remediation) && !loading;
     const bubble = (
-      <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-white px-4 py-4 shadow-sm md:rounded-2xl">
+      <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-card px-4 py-4 shadow-sm md:rounded-2xl">
         {showRemediationFirst ? (
           <>
             <PhotoRemediationPanel
@@ -251,12 +251,12 @@ export const SageChatMessageList = memo(function SageChatMessageList({
             <span className="wiki-sage-dot h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
             Sage
           </div>
-          <div className="rounded-[4px_16px_16px_16px] border border-border bg-white px-4 py-2.5 text-[15px] leading-relaxed text-[var(--wiki-fg)]">
+          <div className="rounded-[4px_16px_16px_16px] border border-border bg-card px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
             <AssistantBubbleContent content={content} streaming={streaming} />
           </div>
         </div>
       ) : (
-        <div className="max-w-[88%] rounded-2xl border border-border bg-white px-4 py-2.5 text-[15px] leading-relaxed text-[var(--wiki-fg)]">
+        <div className="max-w-[88%] rounded-2xl border border-border bg-card px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
           <AssistantBubbleContent content={content} streaming={streaming} />
         </div>
       )}

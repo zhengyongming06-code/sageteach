@@ -30,7 +30,7 @@ type TrackBody = {
 
 const EXTRACTION_SYSTEM = `你是 Sage 知识追踪引擎。根据拍照搜题的解析文本，提取结构化 JSON。
 只返回 JSON。Schema: {"subject":"...","question_summary":"...","question_type":"...","difficulty":1-5,"is_wrong":true/false,"knowledge_points":["..."],"confidence":0-1}
-规则：is_wrong 仅在文本明确表示做错时为 true；普通搜题默认 false。禁止根据【答案】行推断做错。不确定时降低 confidence。`;
+规则：复盘场景下用户上传题目，默认 is_wrong=true（错题讲解）；仅当文本明确说做对了/只是对答案时为 false。禁止根据【答案】行推断做错。不确定时降低 confidence。`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -106,6 +106,18 @@ Deno.serve(async (req) => {
         source_type: "photo",
         source_id: coach_message_id,
         metadata: { question_type: extraction.question_type },
+      });
+    }
+  } else if (knowledgePoints.length > 0) {
+    for (const kp of knowledgePoints) {
+      masteryEvents.push({
+        subject,
+        knowledge_point: kp,
+        event_type: "manual_adjust",
+        delta_score: 0,
+        source_type: "photo",
+        source_id: coach_message_id,
+        metadata: { reason: "photo_analyzed", question_type: extraction.question_type },
       });
     }
   }
