@@ -3690,6 +3690,27 @@
     gap: 0.5rem;
   }
 
+  .photo-remediation-practice-tip {
+    margin: 0 0 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--wiki-muted);
+  }
+
+  .photo-remediation-practice-btn {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+  }
+
+  .photo-remediation-practice-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--wiki-link) 50%, transparent);
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
   .photo-remediation-video {
     display: flex;
     align-items: center;

@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { BookOpen, ExternalLink, MessageCircle, PlayCircle } from "lucide-react";
+import { useState } from "react";
 import { RemediationProgressActions } from "@/components/remediation-progress-actions";
 import {
   buildFollowUpPrompt,
@@ -36,6 +37,7 @@ export function PhotoRemediationPanel({
   className,
 }: PhotoRemediationPanelProps) {
   const { subject, knowledgePoints, videos, practiceQuestions, learnSearch } = remediation;
+  const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
 
   return (
     <div className={cn("photo-remediation-panel", className)}>
@@ -86,22 +88,33 @@ export function PhotoRemediationPanel({
         {practiceQuestions.length > 0 ? (
           <div className="photo-remediation-block">
             <p className="photo-remediation-label">同类练手</p>
+            <p className="photo-remediation-practice-tip">点题目可展开提示；做完后下方可标记「练完」。</p>
             <ol className="photo-remediation-practice">
-              {practiceQuestions.slice(0, 2).map((q, i) => (
-                <li key={q.id} className="photo-remediation-practice-item">
-                  <span className="photo-remediation-practice-num">{i + 1}</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="photo-remediation-practice-stem">{q.stem}</p>
-                    <p className="photo-remediation-practice-meta">
-                      {q.source}
-                      {q.difficulty ? ` · 难度 ${q.difficulty}` : ""}
-                    </p>
-                    {q.answerHint ? (
-                      <p className="photo-remediation-practice-hint">提示：{q.answerHint}</p>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
+              {practiceQuestions.slice(0, 2).map((q, i) => {
+                const open = expandedPracticeId === q.id;
+                return (
+                  <li key={q.id} className="photo-remediation-practice-item">
+                    <span className="photo-remediation-practice-num">{i + 1}</span>
+                    <button
+                      type="button"
+                      className="photo-remediation-practice-btn min-w-0 flex-1 text-left"
+                      onClick={() =>
+                        setExpandedPracticeId((prev) => (prev === q.id ? null : q.id))
+                      }
+                    >
+                      <p className="photo-remediation-practice-stem">{q.stem}</p>
+                      <p className="photo-remediation-practice-meta">
+                        {q.source}
+                        {q.difficulty ? ` · 难度 ${q.difficulty}` : ""}
+                        {q.answerHint ? (open ? " · 收起提示" : " · 点看提示") : ""}
+                      </p>
+                      {open && q.answerHint ? (
+                        <p className="photo-remediation-practice-hint">提示：{q.answerHint}</p>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })}
             </ol>
           </div>
         ) : null}

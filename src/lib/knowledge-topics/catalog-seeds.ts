@@ -46,14 +46,7 @@ function autoEntry(subject: Subject, name: string, gradeBand: GradeBand): Knowle
       url: bilibiliSearchUrl(`${c.name} ${name}`),
       note: c.note,
     })),
-    practiceQuestions: [
-      {
-        id: "auto-q1",
-        stem: `找 2 道「${name}」同类题练手（可拍错题继续识点）。`,
-        source: `${subject} · 待接入题库`,
-        difficulty: 2,
-      },
-    ],
+    practiceQuestions: [],
     relatedNames: [],
   };
 }

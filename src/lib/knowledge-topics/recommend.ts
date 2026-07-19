@@ -44,17 +44,22 @@ function curatorVideo(
   };
 }
 
+function isPlaceholderPractice(q: KnowledgeTopicQuestion): boolean {
+  return q.source.includes("待接入题库") || q.id.startsWith("auto-q") || q.id === "placeholder-1";
+}
+
 function fallbackPractice(
   subject: Subject,
   knowledgePoint: string,
   fromEntry: KnowledgeTopicQuestion[],
 ): KnowledgeTopicQuestion[] {
-  if (fromEntry.length > 0) return fromEntry.slice(0, 3);
+  const real = fromEntry.filter((q) => !isPlaceholderPractice(q));
+  if (real.length > 0) return real.slice(0, 3);
   return [
     {
       id: "placeholder-1",
-      stem: `找 2 道「${knowledgePoint}」同类题练手；不会就拍错题继续识点。`,
-      source: `${subject} · 待接入题库`,
+      stem: `题库暂无「${knowledgePoint}」练手题。可在复盘继续拍错题识点，或稍后再来。`,
+      source: `${subject} · 题库扩充中`,
       difficulty: 2,
     },
   ];
