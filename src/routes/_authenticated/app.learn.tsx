@@ -15,7 +15,9 @@ import {
   resolveLearnTopic,
 } from "@/lib/knowledge-topics";
 import type { KnowledgeTopicEntry } from "@/lib/knowledge-topics/topic-types";
-import { buildKnowledgeRemediation } from "@/lib/knowledge-topics/recommend";
+import { buildKnowledgeRemediationAsync } from "@/lib/knowledge-topics/recommend";
+import type { KnowledgeRemediation } from "@/lib/knowledge-topics/recommend";
+import { practiceQuestionsQueryKey } from "@/lib/knowledge-topics/fetch-practice-questions";
 import {
   fetchLatestPhotoContextForTopic,
   fetchLearnHubTopicsEnriched,
@@ -54,7 +56,7 @@ function formatPhotoContextDate(iso: string): string {
 
 function mergeTopicEntry(
   catalog: KnowledgeTopicEntry | null,
-  remediation: ReturnType<typeof buildKnowledgeRemediation>,
+  remediation: KnowledgeRemediation | null,
   topic: string,
   subject: Subject,
 ): KnowledgeTopicEntry {
@@ -142,16 +144,23 @@ function LearnTopicPage({
     staleTime: 60_000,
   });
 
-  const remediation = useMemo(() => {
-    if (!hasAccess) return null;
-    return buildKnowledgeRemediation({
-      subject,
-      knowledge_points: [topic],
-      question_type: photoContext?.question_type,
-      question_summary: photoContext?.question_summary,
-      difficulty: photoContext?.difficulty,
-    });
-  }, [hasAccess, subject, topic, photoContext]);
+  const { data: remediation = null } = useQuery({
+    queryKey: [
+      ...practiceQuestionsQueryKey(subject, topic),
+      photoContext?.question_type ?? "",
+      photoContext?.question_summary ?? "",
+    ],
+    queryFn: () =>
+      buildKnowledgeRemediationAsync({
+        subject,
+        knowledge_points: [topic],
+        question_type: photoContext?.question_type,
+        question_summary: photoContext?.question_summary,
+        difficulty: photoContext?.difficulty,
+      }),
+    enabled: hasAccess,
+    staleTime: 60_000,
+  });
 
   const entry = useMemo(
     () => (hasAccess ? mergeTopicEntry(catalogEntry, remediation, topic, subject) : null),

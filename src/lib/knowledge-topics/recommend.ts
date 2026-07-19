@@ -5,6 +5,7 @@ import {
   type KnowledgeTopicQuestion,
   type KnowledgeTopicVideo,
 } from "@/lib/knowledge-topics/catalog";
+import { fetchPracticeQuestions } from "@/lib/knowledge-topics/fetch-practice-questions";
 import {
   bilibiliSearchUrl,
   pickCuratorsForSubject,
@@ -82,6 +83,8 @@ export function buildKnowledgeRemediation(input: {
   question_type?: string;
   question_summary?: string;
   difficulty?: number;
+  /** 已从题库取到的练题；有则优先用，否则走 catalog / 占位 */
+  practiceQuestions?: KnowledgeTopicQuestion[];
 }): KnowledgeRemediation | null {
   const knowledgePoints = input.knowledge_points.filter(Boolean);
   if (knowledgePoints.length === 0) return null;
@@ -93,6 +96,11 @@ export function buildKnowledgeRemediation(input: {
     curatorVideo(c, input.subject, primary, input.question_type, i),
   );
 
+  const practiceQuestions =
+    input.practiceQuestions && input.practiceQuestions.length > 0
+      ? input.practiceQuestions.slice(0, 3)
+      : fallbackPractice(input.subject, primary, entry?.practiceQuestions ?? []);
+
   return {
     subject: input.subject,
     knowledgePoints,
@@ -100,19 +108,45 @@ export function buildKnowledgeRemediation(input: {
     questionType: input.question_type,
     questionSummary: input.question_summary,
     videos: mergeVideos(entry?.videos ?? [], curatorVideos),
-    practiceQuestions: fallbackPractice(
-      input.subject,
-      primary,
-      entry?.practiceQuestions ?? [],
-    ),
+    practiceQuestions,
     learnSearch: { subject: input.subject, topic: primary },
   };
+}
+
+/** 同步结构 + 异步从 learning_resources 补练题（数学种子优先）。 */
+export async function buildKnowledgeRemediationAsync(input: {
+  subject: Subject;
+  knowledge_points: string[];
+  question_type?: string;
+  question_summary?: string;
+  difficulty?: number;
+}): Promise<KnowledgeRemediation | null> {
+  const knowledgePoints = input.knowledge_points.filter(Boolean);
+  if (knowledgePoints.length === 0) return null;
+  const primary = knowledgePoints[0]!;
+  const fromDb = await fetchPracticeQuestions(input.subject, primary, 3);
+  return buildKnowledgeRemediation({
+    ...input,
+    practiceQuestions: fromDb.length > 0 ? fromDb : undefined,
+  });
 }
 
 export function buildKnowledgeRemediationFromExtraction(
   extraction: PhotoKnowledgeExtraction,
 ): KnowledgeRemediation | null {
   return buildKnowledgeRemediation({
+    subject: extraction.subject,
+    knowledge_points: extraction.mapped_knowledge_points ?? extraction.knowledge_points,
+    question_type: extraction.question_type,
+    question_summary: extraction.question_summary,
+    difficulty: extraction.difficulty,
+  });
+}
+
+export async function buildKnowledgeRemediationFromExtractionAsync(
+  extraction: PhotoKnowledgeExtraction,
+): Promise<KnowledgeRemediation | null> {
+  return buildKnowledgeRemediationAsync({
     subject: extraction.subject,
     knowledge_points: extraction.mapped_knowledge_points ?? extraction.knowledge_points,
     question_type: extraction.question_type,
@@ -140,7 +174,7 @@ export async function fetchPhotoRemediationsForMessages(
       const msgId = row.coach_message_id as string | null;
       const extraction = row.extraction as PhotoKnowledgeExtraction | null;
       if (!msgId || !extraction) continue;
-      const remediation = buildKnowledgeRemediationFromExtraction({
+      const remediation = await buildKnowledgeRemediationFromExtractionAsync({
         ...extraction,
         subject: (extraction.subject ?? row.subject) as Subject,
       });

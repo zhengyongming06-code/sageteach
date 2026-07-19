@@ -33,7 +33,7 @@ import {
 import { isPhotoQuizRevealRequest } from "@/lib/photo-quiz-parse";
 import { ingestPhotoEvidence } from "@/lib/knowledge-tracking/ingest-client";
 import {
-  buildKnowledgeRemediationFromExtraction,
+  buildKnowledgeRemediationFromExtractionAsync,
   fetchPhotoRemediationsForMessages,
   type KnowledgeRemediation,
 } from "@/lib/knowledge-topics/recommend";
@@ -1461,8 +1461,10 @@ function Review() {
             session_date: scopeDate,
             session_slug: sessionSlug,
             analysis_markdown: markdown,
-          }).then((res) => {
-            const remediation = buildKnowledgeRemediationFromExtraction(res.extraction);
+          }).then(async (res) => {
+            const remediation = await buildKnowledgeRemediationFromExtractionAsync(
+              res.extraction,
+            );
             if (remediation) {
               setPhotoRemediationByMessageId((prev) => ({
                 ...prev,
