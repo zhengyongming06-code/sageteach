@@ -1,5 +1,4 @@
-import { memo, useState, type RefObject } from "react";
-import { ChevronDown } from "lucide-react";
+import { memo, type RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { cn } from "@/lib/utils";
@@ -124,38 +123,6 @@ export type SageChatMessageListProps = {
   newBubbleRef: RefObject<HTMLDivElement | null>;
 };
 
-function CollapsiblePhotoAnalysis({
-  markdown,
-  loading,
-}: {
-  markdown: string;
-  loading: boolean;
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  return (
-    <div className="photo-analysis-collapsible">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="photo-analysis-collapsible-toggle"
-        aria-expanded={expanded}
-      >
-        <span>{expanded ? "收起完整解析" : "展开完整解析"}</span>
-        <ChevronDown
-          className={cn("h-4 w-4 shrink-0 transition-transform", expanded && "rotate-180")}
-          aria-hidden
-        />
-      </button>
-      {expanded ? (
-        <div className="photo-analysis-collapsible-body">
-          <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export const SageChatMessageList = memo(function SageChatMessageList({
   displayMessages,
   isMobile,
@@ -186,43 +153,24 @@ export const SageChatMessageList = memo(function SageChatMessageList({
     const progress = messageId
       ? photoRemediationProgressByMessageId[messageId]
       : undefined;
-    const showRemediationFirst = Boolean(remediation) && !loading;
+    // 解析始终展开在上方；辅学块就绪后出现在下方，避免生成完突然换版式
     const bubble = (
       <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-card px-4 py-4 shadow-sm md:rounded-2xl">
-        {showRemediationFirst ? (
-          <>
-            <PhotoRemediationPanel
-              remediation={remediation!}
-              progress={progress}
-              coachMessageId={messageId}
-              onMarkProgress={
-                messageId && onPhotoRemediationMarkProgress
-                  ? (action) => onPhotoRemediationMarkProgress(messageId, action)
-                  : undefined
-              }
-              onAskFollowUp={onPhotoRemediationFollowUp}
-            />
-            <CollapsiblePhotoAnalysis markdown={markdown} loading={loading} />
-          </>
-        ) : (
-          <>
-            <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
-            {remediation ? (
-              <PhotoRemediationPanel
-                remediation={remediation}
-                progress={progress}
-                coachMessageId={messageId}
-                onMarkProgress={
-                  messageId && onPhotoRemediationMarkProgress
-                    ? (action) => onPhotoRemediationMarkProgress(messageId, action)
-                    : undefined
-                }
-                onAskFollowUp={onPhotoRemediationFollowUp}
-                className="mt-4"
-              />
-            ) : null}
-          </>
-        )}
+        <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
+        {remediation && !loading ? (
+          <PhotoRemediationPanel
+            remediation={remediation}
+            progress={progress}
+            coachMessageId={messageId}
+            onMarkProgress={
+              messageId && onPhotoRemediationMarkProgress
+                ? (action) => onPhotoRemediationMarkProgress(messageId, action)
+                : undefined
+            }
+            onAskFollowUp={onPhotoRemediationFollowUp}
+            className="mt-4"
+          />
+        ) : null}
       </div>
     );
 
