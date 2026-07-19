@@ -1903,7 +1903,7 @@ function Review() {
 
   return (
     <>
-      <div className="fixed inset-0 z-30 flex h-screen max-h-screen flex-col overflow-hidden bg-background lg:hidden">
+      <div className="fixed inset-0 z-30 flex h-dvh max-h-dvh flex-col overflow-hidden bg-background lg:hidden">
         <div className="flex h-11 shrink-0 items-center justify-between px-4">
           <button
             type="button"

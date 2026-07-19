@@ -88,7 +88,7 @@ export const SageChatComposer = memo(
     if (isMobile) {
       return (
         <form
-          className="chat-composer-mobile flex shrink-0 flex-col border-t border-border/70 bg-background"
+          className="chat-composer-mobile safe-bottom flex shrink-0 flex-col border-t border-border/70 bg-background"
           onSubmit={(e) => {
             e.preventDefault();
             handleSubmit();

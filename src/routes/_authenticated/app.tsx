@@ -64,7 +64,7 @@ function AppShell() {
       className={cn(
         appCanvasClass,
         "flex min-h-screen",
-        isReviewChat && "h-screen max-h-screen overflow-hidden",
+        isReviewChat && "h-dvh max-h-dvh overflow-hidden",
       )}
     >
       <aside className="wiki-sidebar fixed inset-y-0 left-0 z-30 hidden w-64 min-h-0 flex-col overflow-hidden p-5 md:flex">
