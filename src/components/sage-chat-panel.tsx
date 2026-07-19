@@ -111,11 +111,22 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
   /** User intent: only auto-scroll while true (scroll/touch-up disables immediately). */
   const stickToBottomRef = useRef(true);
   const touchStartYRef = useRef(0);
+  const prevPhotoStreamRef = useRef<string | null>(streamingPhotoMarkdown);
 
   useImperativeHandle(ref, () => ({
     setInputValue: (value: string) => composerRef.current?.setInputValue(value),
     clearInput: () => composerRef.current?.clearInput(),
   }));
+
+  /** 拍照解析刚结束：停住自动滚底，避免辅学条出现时整页「跳」到底部 */
+  useEffect(() => {
+    const prev = prevPhotoStreamRef.current;
+    prevPhotoStreamRef.current = streamingPhotoMarkdown;
+    if (prev != null && streamingPhotoMarkdown == null && !photoAnalysisLoading) {
+      stickToBottomRef.current = false;
+      setShowJumpToLatest(true);
+    }
+  }, [streamingPhotoMarkdown, photoAnalysisLoading]);
 
   const displayMessages = useMemo(() => {
     if (!pendingUserMessage) return messages;

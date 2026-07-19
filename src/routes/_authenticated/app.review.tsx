@@ -1435,7 +1435,8 @@ function Review() {
 
         if (scopeStale()) return;
 
-        setStreamingPhotoMarkdown(sanitizePhotoMarkdownForDisplay(markdown));
+        const displayMarkdown = sanitizePhotoMarkdownForDisplay(markdown);
+        setStreamingPhotoMarkdown(displayMarkdown);
 
         const reply = wrapPhotoMarkdown(markdown);
         const { data: assistantRow, error: aErr } = await supabase
@@ -1448,44 +1449,66 @@ function Review() {
             review_session_date: scopeDate,
             review_session_slug: sessionSlug,
           })
-          .select("id")
+          .select("id, created_at")
           .single();
         if (aErr) throw aErr;
 
         if (scopeStale()) return;
 
+        // 先写入本地消息再关掉流式气泡，减少「整段拆掉再挂上」的闪跳
         if (assistantRow?.id) {
+          const localRow = {
+            id: assistantRow.id as string,
+            role: "assistant",
+            content: reply,
+            created_at:
+              (assistantRow.created_at as string | undefined) ?? new Date().toISOString(),
+          };
+          setMessageRows((prev) =>
+            prev.some((r) => r.id === localRow.id) ? prev : [...prev, localRow],
+          );
+          setMessages((prev) =>
+            prev.some((m) => m.id === localRow.id)
+              ? prev
+              : [...prev, ...coachRowsToChatMessages([localRow])],
+          );
+          setStreamingPhotoMarkdown(null);
+          setPhotoAnalysisLoading(false);
+
           void ingestPhotoEvidence({
             coach_message_id: assistantRow.id,
             subject: scopeSubject as import("@/lib/subjects").Subject,
             session_date: scopeDate,
             session_slug: sessionSlug,
             analysis_markdown: markdown,
-          }).then(async (res) => {
-            const remediation = await buildKnowledgeRemediationFromExtractionAsync(
-              res.extraction,
-            );
-            if (remediation) {
-              setPhotoRemediationByMessageId((prev) => ({
-                ...prev,
-                [assistantRow.id]: remediation,
-              }));
-            }
-            const n = res.extraction.knowledge_points.length;
-            if (n > 0) {
-              toast.success(`已识点 ${n} 个，已同步到辅学；今晚任务已写入今日页`);
-            }
-          }).catch((e) => {
-            console.warn("[knowledge-ingest]", e);
-          });
+          })
+            .then(async (res) => {
+              const remediation = await buildKnowledgeRemediationFromExtractionAsync(
+                res.extraction,
+              );
+              if (remediation) {
+                setPhotoRemediationByMessageId((prev) => ({
+                  ...prev,
+                  [assistantRow.id]: remediation,
+                }));
+              }
+              const n = res.extraction.knowledge_points.length;
+              if (n > 0) {
+                toast.success(`已识点 ${n} 个，已同步到辅学；今晚任务已写入今日页`);
+              }
+            })
+            .catch((e) => {
+              console.warn("[knowledge-ingest]", e);
+            });
+        } else {
+          setStreamingPhotoMarkdown(null);
+          setPhotoAnalysisLoading(false);
         }
 
         await qc.invalidateQueries({ queryKey: ["review-sessions-index", user.id] });
         if (!scopeStale()) {
-          await loadHistory(scopeSubject, sessionSlug);
+          void loadHistory(scopeSubject, sessionSlug);
         }
-        setStreamingPhotoMarkdown(null);
-        setPhotoAnalysisLoading(false);
         return;
       }
 

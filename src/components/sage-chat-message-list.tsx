@@ -282,13 +282,20 @@ export const SageChatMessageList = memo(function SageChatMessageList({
           </div>
         );
       })}
-      {photoAnalysisLoading || streamingPhotoMarkdown != null
-        ? renderAssistantPhotoBubble(
-            streamingPhotoMarkdown ?? "",
-            photoAnalysisLoading,
-            "__photo_streaming__",
-          )
-        : null}
+      {(() => {
+        const last = displayMessages[displayMessages.length - 1];
+        const lastIsPhoto =
+          last?.role === "assistant" && unwrapPhotoMarkdown(last.content).isPhotoAnalysis;
+        const showPhotoStream =
+          (photoAnalysisLoading || streamingPhotoMarkdown != null) && !lastIsPhoto;
+        return showPhotoStream
+          ? renderAssistantPhotoBubble(
+              streamingPhotoMarkdown ?? "",
+              photoAnalysisLoading,
+              "__photo_streaming__",
+            )
+          : null;
+      })()}
       {!photoAnalysisLoading &&
       streamingPhotoMarkdown == null &&
       (streamingAssistantText != null || isSending)

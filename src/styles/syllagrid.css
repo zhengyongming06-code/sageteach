@@ -3562,6 +3562,61 @@
     margin-top: 0;
   }
 
+  .photo-remediation-collapsed {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    border: 1px solid var(--wiki-border);
+    border-radius: 0.625rem;
+    background: color-mix(in srgb, var(--wiki-bg) 96%, var(--wiki-hover));
+    padding: 0.625rem 0.875rem;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+  }
+
+  .photo-remediation-collapsed:hover {
+    background: var(--wiki-hover);
+  }
+
+  .photo-remediation-collapsed-title {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    font-weight: 650;
+    color: var(--wiki-heading);
+  }
+
+  .photo-remediation-collapsed-meta {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.75rem;
+    color: var(--wiki-muted);
+  }
+
+  .photo-remediation-collapse-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 0;
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--wiki-muted);
+    cursor: pointer;
+  }
+
+  .photo-remediation-collapse-btn:hover {
+    background: color-mix(in srgb, var(--wiki-hover) 80%, transparent);
+    color: var(--wiki-fg);
+  }
+
   .photo-analysis-collapsible {
     margin-top: 0.75rem;
     border-top: 1px solid var(--wiki-border);

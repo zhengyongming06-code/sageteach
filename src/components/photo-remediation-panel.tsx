@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { BookOpen, ExternalLink, MessageCircle, PlayCircle } from "lucide-react";
+import { BookOpen, ChevronDown, ExternalLink, MessageCircle, PlayCircle } from "lucide-react";
 import { useState } from "react";
 import { RemediationProgressActions } from "@/components/remediation-progress-actions";
 import {
@@ -21,6 +21,8 @@ type PhotoRemediationPanelProps = {
   ) => Promise<RemediationProgress>;
   onAskFollowUp?: (text: string) => void;
   className?: string;
+  /** 默认收起，避免识点完成后大块辅学顶走解析阅读位置 */
+  defaultCollapsed?: boolean;
 };
 
 const EMPTY_PROGRESS: RemediationProgress = {
@@ -35,24 +37,60 @@ export function PhotoRemediationPanel({
   onMarkProgress,
   onAskFollowUp,
   className,
+  defaultCollapsed = true,
 }: PhotoRemediationPanelProps) {
   const { subject, knowledgePoints, videos, practiceQuestions, learnSearch } = remediation;
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
+  const [open, setOpen] = useState(!defaultCollapsed);
+
+  const kpPreview = knowledgePoints.slice(0, 2).join("、");
+  const metaBits = [
+    videos.length > 0 ? `${Math.min(videos.length, 2)} 个视频` : null,
+    practiceQuestions.length > 0 ? `${Math.min(practiceQuestions.length, 2)} 道练手` : null,
+  ].filter(Boolean);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className={cn("photo-remediation-collapsed", className)}
+        onClick={() => setOpen(true)}
+      >
+        <span className="photo-remediation-collapsed-title">辅学已就绪</span>
+        <span className="photo-remediation-collapsed-meta">
+          {kpPreview || subject}
+          {metaBits.length > 0 ? ` · ${metaBits.join(" · ")}` : ""}
+          {" · 点开"}
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-60" aria-hidden />
+      </button>
+    );
+  }
 
   return (
     <div className={cn("photo-remediation-panel", className)}>
       <div className="photo-remediation-head">
-        <div className="photo-remediation-tags">
-          {knowledgePoints.map((kp) => (
-            <Link
-              key={kp}
-              to="/app/learn"
-              search={{ subject, topic: kp }}
-              className="photo-remediation-tag"
-            >
-              {kp}
-            </Link>
-          ))}
+        <div className="flex items-start justify-between gap-2">
+          <div className="photo-remediation-tags min-w-0 flex-1">
+            {knowledgePoints.map((kp) => (
+              <Link
+                key={kp}
+                to="/app/learn"
+                search={{ subject, topic: kp }}
+                className="photo-remediation-tag"
+              >
+                {kp}
+              </Link>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="photo-remediation-collapse-btn"
+            aria-label="收起辅学块"
+            onClick={() => setOpen(false)}
+          >
+            <ChevronDown className="h-4 w-4 rotate-180" aria-hidden />
+          </button>
         </div>
       </div>
 
@@ -88,10 +126,12 @@ export function PhotoRemediationPanel({
         {practiceQuestions.length > 0 ? (
           <div className="photo-remediation-block">
             <p className="photo-remediation-label">同类练手</p>
-            <p className="photo-remediation-practice-tip">点题目可展开提示；做完后下方可标记「练完」。</p>
+            <p className="photo-remediation-practice-tip">
+              点题目可展开提示；做完后下方可标记「练完」。
+            </p>
             <ol className="photo-remediation-practice">
               {practiceQuestions.slice(0, 2).map((q, i) => {
-                const open = expandedPracticeId === q.id;
+                const practiceOpen = expandedPracticeId === q.id;
                 return (
                   <li key={q.id} className="photo-remediation-practice-item">
                     <span className="photo-remediation-practice-num">{i + 1}</span>
@@ -106,9 +146,13 @@ export function PhotoRemediationPanel({
                       <p className="photo-remediation-practice-meta">
                         {q.source}
                         {q.difficulty ? ` · 难度 ${q.difficulty}` : ""}
-                        {q.answerHint ? (open ? " · 收起提示" : " · 点看提示") : ""}
+                        {q.answerHint
+                          ? practiceOpen
+                            ? " · 收起提示"
+                            : " · 点看提示"
+                          : ""}
                       </p>
-                      {open && q.answerHint ? (
+                      {practiceOpen && q.answerHint ? (
                         <p className="photo-remediation-practice-hint">提示：{q.answerHint}</p>
                       ) : null}
                     </button>
