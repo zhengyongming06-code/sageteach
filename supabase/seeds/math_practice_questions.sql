@@ -1,6 +1,10 @@
--- 数学练题种子（先跑通通路，再慢慢加真题）
+-- 数学练题种子（通路冒烟：抛物线 + 导数应用 各 2 道）
 -- 在 Supabase Dashboard → SQL Editor 整段执行
 -- 知识点名必须与识点/辅学一致（如「抛物线」「导数应用」）
+--
+-- 高一～高三全考点均匀覆盖（每点 2 道）请用：
+--   supabase/seeds/math_practice_questions_full.sql
+-- 若已跑过本文件，仍可再跑 full；抛物线/导数应用会再各增 2 道不同题。
 
 -- ---------- 抛物线 × 2 ----------
 with q1 as (
@@ -76,7 +80,8 @@ with q4 as (
 insert into public.resource_knowledge_tags (resource_id, subject, knowledge_point, sort_order)
 select id, '数学', '导数应用', 1 from q4;
 
--- 自检：应能看到 4 道 published 数学题
+-- 自检：本文件应能看到 4 道 published 数学题（抛物线×2 + 导数应用×2）
+-- 全覆盖自检见 math_practice_questions_full.sql 文件头
 -- select r.id, r.source_label, t.knowledge_point
 -- from learning_resources r
 -- join resource_knowledge_tags t on t.resource_id = r.id

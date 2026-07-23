@@ -155,7 +155,7 @@ export const SageChatMessageList = memo(function SageChatMessageList({
       : undefined;
     // 解析始终展开在上方；辅学块就绪后出现在下方，避免生成完突然换版式
     const bubble = (
-      <div className="w-full min-w-0 rounded-[4px_16px_16px_16px] border border-border/80 bg-card px-4 py-4 shadow-sm md:rounded-2xl">
+      <div className="w-full min-w-0 max-w-full overflow-x-auto rounded-[4px_16px_16px_16px] border border-border/80 bg-card px-4 py-4 shadow-sm md:rounded-2xl">
         <PhotoAnalysisMarkdown markdown={markdown} loading={loading} />
         {remediation && !loading ? (
           <PhotoRemediationPanel
@@ -175,9 +175,9 @@ export const SageChatMessageList = memo(function SageChatMessageList({
     );
 
     return (
-      <div key={key} className="flex justify-start">
+      <div key={key} className="flex min-w-0 max-w-full justify-start">
         {isMobile ? (
-          <div className="flex max-w-[94%] flex-col items-start gap-1">
+          <div className="flex w-full min-w-0 max-w-[94%] flex-col items-stretch gap-1">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="wiki-sage-dot h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
               Sage
@@ -185,26 +185,26 @@ export const SageChatMessageList = memo(function SageChatMessageList({
             {bubble}
           </div>
         ) : (
-          <div className="max-w-[min(100%,32rem)] min-w-0">{bubble}</div>
+          <div className="w-full min-w-0 max-w-[min(100%,32rem)]">{bubble}</div>
         )}
       </div>
     );
   };
 
   const renderAssistantBubble = (content: string, streaming = false, key?: string) => (
-    <div key={key} className="flex justify-start">
+    <div key={key} className="flex min-w-0 max-w-full justify-start">
       {isMobile ? (
-        <div className="flex max-w-[88%] flex-col items-start gap-1">
+        <div className="flex w-full min-w-0 max-w-[88%] flex-col items-stretch gap-1">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="wiki-sage-dot h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden />
             Sage
           </div>
-          <div className="rounded-[4px_16px_16px_16px] border border-border bg-card px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+          <div className="min-w-0 max-w-full overflow-x-auto rounded-[4px_16px_16px_16px] border border-border bg-card px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
             <AssistantBubbleContent content={content} streaming={streaming} />
           </div>
         </div>
       ) : (
-        <div className="max-w-[88%] rounded-2xl border border-border bg-card px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
+        <div className="min-w-0 max-w-[88%] overflow-x-auto rounded-2xl border border-border bg-card px-4 py-2.5 text-[15px] leading-relaxed text-foreground">
           <AssistantBubbleContent content={content} streaming={streaming} />
         </div>
       )}
@@ -262,12 +262,12 @@ export const SageChatMessageList = memo(function SageChatMessageList({
             key={msg.id}
             data-message-id={msg.id}
             ref={isFlyingUser ? newBubbleRef : undefined}
-            className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+            className={`flex min-w-0 max-w-full ${isUser ? "justify-end" : "justify-start"}`}
           >
             {isUser ? (
               <div
                 className={cn(
-                  "wiki-user-bubble max-w-[88%] px-4 py-2.5 text-[15px] leading-relaxed text-white",
+                  "wiki-user-bubble min-w-0 max-w-[88%] overflow-x-auto px-4 py-2.5 text-[15px] leading-relaxed text-white",
                   isMobile
                     ? "rounded-[16px_4px_16px_16px]"
                     : "rounded-2xl",

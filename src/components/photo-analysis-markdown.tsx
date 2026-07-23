@@ -33,7 +33,9 @@ const photoMarkdownComponents: Components = {
   },
   p({ children }) {
     return (
-      <p className="mb-4 text-[15px] leading-[1.8] text-foreground/90 last:mb-0">{children}</p>
+      <p className="mb-4 max-w-full overflow-x-auto text-[15px] leading-[1.8] break-words text-foreground/90 last:mb-0">
+        {children}
+      </p>
     );
   },
   strong({ children }) {
@@ -127,8 +129,9 @@ export function PhotoAnalysisMarkdown({ markdown, loading = false, className }: 
   return (
     <div
       className={cn(
-        "photo-analysis-md w-full min-w-0 max-w-prose text-[15px] leading-[1.8] text-foreground",
-        "[&_.katex-display]:my-3 [&_.katex-display]:block [&_.katex-display]:overflow-x-auto [&_.katex-display]:text-center",
+        "photo-analysis-md w-full min-w-0 max-w-full break-words text-[15px] leading-[1.8] text-foreground",
+        "[&_.katex-display]:my-3 [&_.katex-display]:block [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:text-center",
+        "[&_.katex]:max-w-full [&_.katex-html]:max-w-full",
         className,
       )}
     >

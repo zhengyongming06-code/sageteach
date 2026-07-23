@@ -3657,6 +3657,19 @@
     color: var(--wiki-muted);
   }
 
+  /* 长公式不得撑开整页聊天；宽公式只在气泡内横向滑动 */
+  .photo-analysis-md {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .photo-analysis-md .katex-display > .katex {
+    display: inline-block;
+    max-width: 100%;
+    text-align: initial;
+  }
+
   .photo-remediation-head {
     padding: 0.75rem 0.875rem 0;
   }

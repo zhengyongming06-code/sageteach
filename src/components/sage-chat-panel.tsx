@@ -292,10 +292,10 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
 
   return (
     <div
-      className={cn("flex min-h-0 flex-1 flex-col", expand && "h-full min-h-0", className)}
+      className={cn("flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden", expand && "h-full min-h-0", className)}
       style={style}
     >
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden">
         <div
           ref={scrollRef}
           onScroll={handleScroll}
@@ -304,10 +304,10 @@ export const SageChatPanel = forwardRef(function SageChatPanel(
           onWheel={handleWheel}
           className={cn(
             isMobile
-              ? "h-full min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
+              ? "h-full min-h-0 min-w-0 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-3 [-webkit-overflow-scrolling:touch]"
               : expand
-                ? "h-full min-h-0 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4"
-                : "min-h-[200px] flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]",
+                ? "h-full min-h-0 min-w-0 space-y-3 overflow-y-auto overflow-x-hidden rounded-2xl border border-border bg-card/40 p-4"
+                : "min-h-[200px] min-w-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden rounded-2xl border border-border bg-card/40 p-4 md:min-h-[280px]",
           )}
         >
           <SageChatMessageList
